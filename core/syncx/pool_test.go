@@ -125,15 +125,6 @@ func BenchmarkPool(b *testing.B) {
 		}
 	})
 
-	b.Run("syncx.Pool 单任务提交开销评估【单核】", func(b *testing.B) {
-		b.ReportAllocs()
-		p := NewPool()
-		for i := 0; i < b.N; i++ {
-			p.Go(f)
-		}
-		p.Wait()
-	})
-
 	b.Run("syncx.Pool 单任务整体开销评估【单核】", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -141,6 +132,15 @@ func BenchmarkPool(b *testing.B) {
 			p.Go(f)
 			p.Wait()
 		}
+	})
+
+	b.Run("syncx.Pool 单任务提交开销评估【单核】", func(b *testing.B) {
+		b.ReportAllocs()
+		p := NewPool()
+		for i := 0; i < b.N; i++ {
+			p.Go(f)
+		}
+		p.Wait()
 	})
 
 	b.Run("mr.Finish 单任务提交开销评估【多核】", func(b *testing.B) {
