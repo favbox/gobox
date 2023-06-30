@@ -13,5 +13,5 @@ type Transporter interface {
 	Shutdown(ctx context.Context) error
 }
 
-// OnData 连接数据准备完毕时的回调函数。
+// OnData 连接数据(如客户端请求数据)准备完毕时的回调函数。
 type OnData func(ctx context.Context, conn any) error

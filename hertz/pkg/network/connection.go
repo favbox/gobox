@@ -14,12 +14,6 @@ type Reader interface {
 	// Peek 返回接下来的 n 个字节，而不推进读取器。
 	Peek(n int) ([]byte, error)
 
-	// ReadByte 通过读指针前进来读取下一个字节。
-	ReadByte() (byte, error)
-
-	// ReadBinary 通过读指针前进来读取下 n 个字节。
-	ReadBinary(n int) (p []byte, err error)
-
 	// Skip 跳过接下来的 n 个字节。
 	Skip(n int) error
 
@@ -32,6 +26,12 @@ type Reader interface {
 
 	// Len 返回读取器中可读数据的总长度。
 	Len() int
+
+	// ReadByte 通过读指针前进来读取下一个字节。
+	ReadByte() (byte, error)
+
+	// ReadBinary 通过读指针前进来读取下 n 个字节。
+	ReadBinary(n int) (p []byte, err error)
 }
 
 // Writer 适用于缓冲写入器。
