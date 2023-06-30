@@ -19,7 +19,7 @@ const (
 
 // Pool 表示字节缓冲池。
 //
-// 不同的吃可用于不同类型的字节缓冲区。
+// 不同的池可用于不同类型的字节缓冲区。
 type Pool struct {
 	calls       [steps]uint64
 	calibrating uint64 // 校准值

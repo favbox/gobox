@@ -4,9 +4,9 @@ import (
 	"io"
 )
 
-// ByteBuffer 提供字节缓冲区，可用于最小化内存分配。
+// ByteBuffer 提供字节缓冲区，可最小化内存分配。
 //
-// ByteBuffer 可用于将数据附加到字节切片的函数。
+// ByteBuffer 可将数据附加到字节切片的函数。
 type ByteBuffer struct {
 	// B 是用于 append 操作的缓冲区。
 	B []byte
@@ -84,7 +84,7 @@ func (b *ByteBuffer) WriteByte(c byte) error {
 
 // WriteString 附加字符串 s 到缓冲区。
 //
-// 返回附加字符串的长度和一个 nil error。
+// 返回附加字符串的长度和 nil error。
 func (b *ByteBuffer) WriteString(s string) (int, error) {
 	b.B = append(b.B, s...)
 	return len(s), nil
