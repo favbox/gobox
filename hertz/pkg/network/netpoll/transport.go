@@ -31,6 +31,7 @@ type transport struct {
 	OnConnect        func(ctx context.Context, conn network.Conn) context.Context
 }
 
+// NewTransporter 创建新的网络传输器实现。
 func NewTransporter(options *config.Options) network.Transporter {
 	return &transport{
 		RWMutex:          sync.RWMutex{},
@@ -47,6 +48,7 @@ func NewTransporter(options *config.Options) network.Transporter {
 	}
 }
 
+// ListenAndServe 绑定监听地址并持续服务，除非出现错误或传输器关闭。
 func (t *transport) ListenAndServe(onRequest network.OnData) (err error) {
 	_ = network.UnlinkUdsFile(t.network, t.addr)
 	if t.listenConfig != nil {

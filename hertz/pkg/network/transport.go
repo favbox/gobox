@@ -2,6 +2,7 @@ package network
 
 import "context"
 
+// Transporter 表示网络传输层接口。
 type Transporter interface {
 	// ListenAndServe 监听并准备接收连接。
 	ListenAndServe(OnData) error

@@ -1,10 +1,49 @@
 package bytesconv
 
 import (
+	"fmt"
+	"net/url"
 	"testing"
 
 	"github.com/favbox/gobox/hertz/pkg/common/test/assert"
 )
+
+func TestAppendQuotedArg(t *testing.T) {
+	t.Parallel()
+
+	// 与 url.QueryEscape 同步
+	allCases := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		allCases[i] = byte(i)
+	}
+	res := B2s(AppendQuotedArg(nil, allCases))
+	expect := url.QueryEscape(B2s(allCases))
+	assert.DeepEqual(t, expect, res)
+}
+
+func TestAppendQuotedPath(t *testing.T) {
+	t.Parallel()
+
+	// 测试所有字符
+	pathSegment := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		pathSegment[i] = byte(i)
+	}
+	for _, s := range []struct {
+		path string
+	}{
+		{"/"},
+		{"//"},
+		{"/foo/bar"},
+		{"*"},
+		{"/foo/" + B2s(pathSegment)},
+	} {
+		u := url.URL{Path: s.path}
+		expectedS := u.EscapedPath()
+		res := B2s(AppendQuotedPath(nil, S2b(s.path)))
+		assert.DeepEqual(t, expectedS, res)
+	}
+}
 
 func TestLowercaseBytes(t *testing.T) {
 	t.Parallel()
@@ -48,6 +87,22 @@ func TestS2b(t *testing.T) {
 		{"http", []byte("http")},
 	} {
 		assert.DeepEqual(t, v.b, S2b(v.s))
+	}
+}
+
+func TestAppendUint(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []struct {
+		n int
+	}{
+		{0},
+		{123},
+		{0x7fffffff},
+	} {
+		expectedS := fmt.Sprintf("%d", s.n)
+		s := AppendUint(nil, s.n)
+		assert.DeepEqual(t, expectedS, B2s(s))
 	}
 }
 
@@ -97,6 +152,57 @@ func BenchmarkB2s(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_ = B2s(bs)
+			}
+		})
+	})
+}
+
+func BenchmarkAppendQuotedArg(b *testing.B) {
+	allCases := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		allCases[i] = byte(i)
+	}
+
+	b.Run("AppendQuotedArg", func(b *testing.B) {
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = B2s(AppendQuotedArg(nil, allCases))
+			}
+		})
+	})
+
+	b.Run("url.QueryEscape", func(b *testing.B) {
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = url.QueryEscape(B2s(allCases))
+			}
+		})
+	})
+}
+
+func BenchmarkAppendQuotedPath(b *testing.B) {
+	allCases := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		allCases[i] = byte(i)
+	}
+	u := url.URL{Path: B2s(allCases)}
+
+	b.Run("AppendQuotedPath", func(b *testing.B) {
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = B2s(AppendQuotedPath(nil, allCases))
+			}
+		})
+	})
+
+	b.Run("url.QueryEscape", func(b *testing.B) {
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = u.EscapedPath()
 			}
 		})
 	})

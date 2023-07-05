@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/favbox/gobox/http/pkg/common/test/assert"
+	"github.com/favbox/gobox/hertz/pkg/common/test/assert"
 )
 
 func ExampleContextPool() {

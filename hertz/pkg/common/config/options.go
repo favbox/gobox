@@ -50,7 +50,7 @@ type Options struct {
 	// 用 url.RawPath 来查找参数。
 	UseRawPath bool
 
-	// 移除额外的斜杠，以从URL中解析参数。
+	// 移除额外的斜线，以从URL中解析参数。
 	RemoveExtraSlash bool
 
 	// 不逃逸路径值。

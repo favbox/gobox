@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/favbox/gobox/http/pkg/common/test/assert"
+	"github.com/favbox/gobox/hertz/pkg/common/test/assert"
 	"github.com/zeromicro/go-zero/core/mr"
 )
 
