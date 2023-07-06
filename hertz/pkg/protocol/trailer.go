@@ -57,7 +57,7 @@ func (t *Trailer) Add(key, value string) error {
 	return t.addArgBytes(t.bufKV.key, t.bufKV.value, ArgsHasValue)
 }
 
-// UpdateArgBytes 更新指定 key 的 value。
+// UpdateArgBytes 更新标头。
 func (t *Trailer) UpdateArgBytes(key, value []byte) error {
 	if IsBadTrailer(key) {
 		return errs.NewPublicf("禁止使用的 Trailer 键: %q", key)

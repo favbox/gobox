@@ -94,8 +94,8 @@ func AppendUint(dst []byte, n int) []byte {
 	return dst
 }
 
-// AppendHTTPate 附加 HTTP 兼容的时间表示比到字节切片 dst 并返回。
-func AppendHTTPate(dst []byte, date time.Time) []byte {
+// AppendHTTPDate 附加 HTTP 兼容的时间表示比到字节切片 dst 并返回。
+func AppendHTTPDate(dst []byte, date time.Time) []byte {
 	return date.UTC().AppendFormat(dst, http.TimeFormat)
 }
 

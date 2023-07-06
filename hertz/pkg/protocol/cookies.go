@@ -104,7 +104,7 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 		dst = append(dst, '=')
 		dst = bytesconv.AppendUint(dst, c.maxAge)
 	} else if !c.expire.IsZero() {
-		c.bufKV.value = bytesconv.AppendHTTPate(c.bufKV.value[:0], c.expire)
+		c.bufKV.value = bytesconv.AppendHTTPDate(c.bufKV.value[:0], c.expire)
 		dst = appendCookiePart(dst, bytestr.StrCookieExpires, c.bufKV.value)
 	}
 	if len(c.domain) > 0 {
@@ -135,7 +135,7 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	return dst
 }
 
-// Cookie 返回 Cookie 的表达形式。
+// Cookie 返回 Cookie 的字节切片形式。
 func (c *Cookie) Cookie() []byte {
 	c.buf = c.AppendBytes(c.buf[:0])
 	return c.buf
@@ -276,7 +276,7 @@ func (c *Cookie) Parse(src string) error {
 	return c.ParseBytes(c.buf)
 }
 
-// ParseBytes 解析 Set-Cookie 头信息。
+// ParseBytes 从指定字节切片中解析并填充 Cookie。
 func (c *Cookie) ParseBytes(src []byte) error {
 	c.Reset()
 

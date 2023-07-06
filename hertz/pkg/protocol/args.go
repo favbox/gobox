@@ -408,7 +408,7 @@ func setArgBytes(args []argsKV, key, value []byte, noValue bool) []argsKV {
 	return appendArgBytes(args, key, value, noValue)
 }
 
-// 附加一对KV参数对到参数键值对切片。
+// 附加一对字符串形式的标头。
 func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
@@ -422,7 +422,7 @@ func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	return args
 }
 
-// 附加一对KV参数到参数键值对切片。
+// 附加一对字节切片的形式的标头。
 func appendArgBytes(args []argsKV, key, value []byte, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
@@ -450,11 +450,11 @@ func updateArgBytes(args []argsKV, key, value []byte) []argsKV {
 	return args
 }
 
-// 分配参数。
+// 按需扩容参数切片。
 //
 // 有容量则扩展1个，容量不足则附加1个（容量可能翻倍）。
 //
-// 返回扩充后的参数切片及扩中的新分配的那个参数。
+// 返回扩容后的完整切片及扩容部分的第一个新切片指针。
 func allocArg(args []argsKV) ([]argsKV, *argsKV) {
 	n := len(args)
 	if cap(args) > n {

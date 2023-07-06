@@ -2,11 +2,16 @@ package protocol
 
 import (
 	"bytes"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/favbox/gobox/hertz/internal/bytesconv"
 	"github.com/favbox/gobox/hertz/internal/bytestr"
 	"github.com/favbox/gobox/hertz/internal/nocopy"
 	errs "github.com/favbox/gobox/hertz/pkg/common/errors"
+	"github.com/favbox/gobox/hertz/pkg/common/hlog"
 	"github.com/favbox/gobox/hertz/pkg/common/utils"
 	"github.com/favbox/gobox/hertz/pkg/protocol/consts"
 )
@@ -47,7 +52,7 @@ type RequestHeader struct {
 	rawHeaders []byte
 }
 
-// Add 添加一对请求头KV。
+// Add 添加一对字符串形式的请求头。
 // Add 可以添加相同键的多个值。使用 Set 设置单个键值对。
 //
 // Content-Type, Content-Length, Connection, Cookie,
@@ -61,12 +66,12 @@ func (h *RequestHeader) Add(key, value string) {
 	h.h = appendArg(h.h, bytesconv.B2s(k), value, ArgsHasValue)
 }
 
-// AddArgBytes 添加一对请求头KV。
+// AddArgBytes 添加一对字节切片形式的请求头。
 func (h *RequestHeader) AddArgBytes(key, value []byte, noValue bool) {
 	h.h = appendArgBytes(h.h, key, value, noValue)
 }
 
-// AppendBytes 将请求头关键信息附加到 dst 并返回。
+// AppendBytes 将请求头信息附加到 dst 并返回。
 func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, h.Method()...)
 	dst = append(dst, ' ')
@@ -149,7 +154,7 @@ func (h *RequestHeader) ConnectionClose() bool {
 	return h.connectionClose
 }
 
-// ContentLength 返回内容长度标头值。
+// ContentLength 返回请求头中内容长度标头的值。
 //
 // 值可能为负数
 // -1 意为 Transfer-Encoding: chunked，即传输编码被设置为分块传输。
@@ -278,8 +283,7 @@ func (h *RequestHeader) Get(key string) string {
 	return string(h.Peek(key))
 }
 
-// GetAll 返回指定 key 的所有标头值的字符串切片。
-// 所以该方法也是并发安全且长期可用的。
+// GetAll 返回指定 key 的所有标头值的字符串切片，且并发安全、长期可用。
 func (h *RequestHeader) GetAll(key string) []string {
 	res := make([]string, 0)
 	headers := h.PeekAll(key)
@@ -351,7 +355,7 @@ func (h *RequestHeader) IsDisableNormalizing() bool {
 	return h.disableNormalizing
 }
 
-// IsHTTP11 返回是否为 HTTP/1.1 请求。
+// IsHTTP11 返回请求协议是否为 HTTP/1.1。
 func (h *RequestHeader) IsHTTP11() bool {
 	return h.protocol == consts.HTTP11
 }
@@ -689,7 +693,7 @@ func (h *RequestHeader) SetContentLengthBytes(contentLength []byte) {
 	h.contentLengthBytes = append(h.contentLengthBytes[:0], contentLength...)
 }
 
-// SetContentTypeBytes 设置 Content-Type 标头值字节切片。
+// SetContentTypeBytes 设置内容类型请求头。
 func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
@@ -836,7 +840,7 @@ func (h *RequestHeader) String() string {
 	return string(h.Header())
 }
 
-// Trailer 返回 HTTP 标头的挂车。
+// Trailer 返回 HTTP 请求标头的挂车。
 func (h *RequestHeader) Trailer() *Trailer {
 	if h.trailer == nil {
 		h.trailer = new(Trailer)
@@ -892,6 +896,810 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 	visitArgs(h.cookies, f)
 }
 
+var (
+	ServerDate     atomic.Value
+	ServerDateOnce sync.Once // serverDateOnce.Do(updateServerDate)
+)
+
+// ResponseHeader 表示 HTTP 响应头。
+//
+// 禁止复制 ResponseHeader 实例，而是通过创建新实例并 CopyTo 来替代。
+//
+// ResponseHeader 实例 *不能* 用于多协程，并发不是安全的。
+type ResponseHeader struct {
+	noCopy nocopy.NoCopy
+
+	disableNormalizing   bool // 禁用标头名称规范化？
+	connectionClose      bool // 连接已关闭？
+	noDefaultContentType bool // 不用默认内容类型？
+	noDefaultDate        bool // 不用默认日期？
+
+	statusCode         int
+	contentLength      int
+	contentLengthBytes []byte
+	contentEncoding    []byte
+
+	contentType []byte
+	server      []byte
+	mulHeader   [][]byte
+	protocol    string
+
+	h       []argsKV
+	bufKV   argsKV
+	trailer *Trailer
+
+	cookies []argsKV
+
+	headerLength int
+}
+
+// Add 添加一对字符串形式的响应头。
+// Add 可以添加相同键的多个值。使用 Set 设置单个键值对。
+//
+// Content-Type, Content-Length, Connection, Cookie,
+// Transfer-Encoding, Host 和 User-Agent 只能设置一次，新值会覆盖旧值。
+func (h *ResponseHeader) Add(key, value string) {
+	if h.setSpecialHeader(bytesconv.S2b(key), bytesconv.S2b(value)) {
+		return
+	}
+
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	h.h = appendArg(h.h, bytesconv.B2s(k), value, ArgsHasValue)
+}
+
+// AddArgBytes 添加一对字节切片形式的响应头。
+func (h *ResponseHeader) AddArgBytes(key, value []byte, noValue bool) {
+	h.h = appendArgBytes(h.h, key, value, noValue)
+}
+
+// AppendBytes 将响应头信息附加到 dst 并返回。
+func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
+	statusCode := h.StatusCode()
+	if statusCode < 0 {
+		statusCode = consts.StatusOK
+	}
+	dst = append(dst, consts.StatusLine(statusCode)...)
+
+	server := h.Server()
+	if len(server) != 0 {
+		dst = appendHeaderLine(dst, bytestr.StrServer, server)
+	}
+
+	if !h.noDefaultDate {
+		ServerDateOnce.Do(UpdateServerDate)
+		dst = appendHeaderLine(dst, bytestr.StrDate, ServerDate.Load().([]byte))
+	}
+
+	// 附加内容类型仅限于非零响应，除非明确设置。
+	if h.ContentLength() != 0 || len(h.contentType) > 0 {
+		contentType := h.ContentType()
+		if len(contentType) > 0 {
+			dst = appendHeaderLine(dst, bytestr.StrContentType, contentType)
+		}
+	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		dst = appendHeaderLine(dst, bytestr.StrContentEncoding, contentEncoding)
+	}
+	if len(h.contentLengthBytes) > 0 {
+		dst = appendHeaderLine(dst, bytestr.StrContentLength, h.contentLengthBytes)
+	}
+
+	for i, n := 0, len(h.h); i < n; i++ {
+		kv := &h.h[i]
+		if h.noDefaultDate || !bytes.Equal(kv.key, bytestr.StrDate) {
+			dst = appendHeaderLine(dst, kv.key, kv.value)
+		}
+	}
+
+	if !h.Trailer().Empty() {
+		dst = appendHeaderLine(dst, bytestr.StrTrailer, h.Trailer().GetBytes())
+	}
+
+	n := len(h.cookies)
+	if n > 0 {
+		for i := 0; i < n; i++ {
+			kv := &h.cookies[i]
+			dst = appendHeaderLine(dst, bytestr.StrSetCookie, kv.value)
+		}
+	}
+
+	if h.ConnectionClose() {
+		dst = appendHeaderLine(dst, bytestr.StrConnection, bytestr.StrClose)
+	}
+
+	return append(dst, bytestr.StrCRLF...)
+}
+
+// ConnectionClose 返回连接是否关闭，即是否设置了 'Connection: close' 标头。
+func (h *ResponseHeader) ConnectionClose() bool {
+	return h.connectionClose
+}
+
+// ContentEncoding 返回内容编码标头值。
+func (h *ResponseHeader) ContentEncoding() []byte {
+	return h.contentEncoding
+}
+
+// ContentLength 返回内容长度标头值。
+//
+// 值可能为负数
+// -1 意为 Transfer-Encoding: chunked，即传输编码被设置为分块传输。
+// -2 意为 Transfer-Encoding: identity，即传输编码被设置为自身传输（不压缩和修改）。
+func (h *ResponseHeader) ContentLength() int {
+	return h.contentLength
+}
+
+// ContentLengthBytes 返回内容长度的字节切片形式。
+func (h *ResponseHeader) ContentLengthBytes() []byte {
+	return h.contentLengthBytes
+}
+
+// ContentType 返回内容类型标头值。
+func (h *ResponseHeader) ContentType() []byte {
+	contentType := h.contentType
+	if !h.noDefaultContentType && len(h.contentType) == 0 {
+		contentType = bytestr.DefaultContentType
+	}
+	return contentType
+}
+
+// Cookie 根据指定 Cookie 的键名填充 Cookie。
+//
+// 如果该键名无 Cookie 则返回 false。
+func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
+	v := peekArgBytes(h.cookies, cookie.Key())
+	if v == nil {
+		return false
+	}
+	_ = cookie.ParseBytes(v)
+	return true
+}
+
+// CopyTo 拷贝所有标头至新目标 dst。
+func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
+	dst.Reset()
+
+	dst.disableNormalizing = h.disableNormalizing
+	dst.connectionClose = h.connectionClose
+	dst.noDefaultContentType = h.noDefaultContentType
+	dst.noDefaultDate = h.noDefaultDate
+
+	dst.statusCode = h.statusCode
+	dst.contentLength = h.contentLength
+	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
+	dst.contentEncoding = append(dst.contentEncoding[:0], h.contentEncoding...)
+	dst.contentType = append(dst.contentType[:0], h.contentType...)
+	dst.server = append(dst.server[:0], h.server...)
+	dst.h = copyArgs(dst.h, h.h)
+	dst.cookies = copyArgs(dst.cookies, h.cookies)
+	dst.protocol = h.protocol
+	dst.headerLength = h.headerLength
+	h.Trailer().CopyTo(dst.Trailer())
+}
+
+// Del 删除指定 key 的响应头。
+func (h *ResponseHeader) Del(key string) {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	h.del(k)
+}
+
+// DelBytes  删除指定 key 的响应头。
+func (h *ResponseHeader) DelBytes(key []byte) {
+	h.bufKV.key = append(h.bufKV.key[:0], key...)
+	utils.NormalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
+	h.del(h.bufKV.key)
+}
+
+func (h *ResponseHeader) del(key []byte) {
+	// 清空独立变量
+	switch string(key) {
+	case consts.HeaderContentType:
+		h.contentType = h.contentType[:0]
+	case consts.HeaderContentEncoding:
+		h.contentEncoding = h.contentEncoding[:0]
+	case consts.HeaderServer:
+		h.server = h.server[:0]
+	case consts.HeaderSetCookie:
+		h.cookies = h.cookies[:0]
+	case consts.HeaderContentLength:
+		h.contentLength = 0
+		h.contentLengthBytes = h.contentLengthBytes[:0]
+	case consts.HeaderConnection:
+		h.connectionClose = false
+	case consts.HeaderTrailer:
+		h.Trailer().ResetSkipNormalize()
+	}
+	// 删除所有同键名的标头
+	h.h = delAllArgsBytes(h.h, key)
+}
+
+// DelAllCookies 删除响应头中的所有 Cookie。
+func (h *ResponseHeader) DelAllCookies() {
+	h.cookies = h.cookies[:0]
+}
+
+// DelClientCookie 指示客户端删除指定的 Cookie。
+// 针对特定域名或路径的 Cookie，需要手动删除：
+//
+//	c := AcquireCookie()
+//	c.SetKey(key)
+//	c.SetDomain("example.com")
+//	c.SetPath("/path")
+//	c.SetExpire(CookieExpireDelete)
+//	h.SetCookie(c)
+//	ReleaseCookie(c)
+//
+// 如果只删响应头中的 cookie，请使用 DelCookie。
+func (h *ResponseHeader) DelClientCookie(key string) {
+	h.DelCookie(key)
+
+	c := AcquireCookie()
+	c.SetKey(key)
+	c.SetExpire(CookieExpireDelete)
+	h.SetCookie(c)
+	ReleaseCookie(c)
+}
+
+// DelClientCookieBytes 指示客户端删除指定的 Cookie。
+// 针对特定域名或路径的 Cookie，需要手动删除：
+//
+//	c := AcquireCookie()
+//	c.SetKey(key)
+//	c.SetDomain("example.com")
+//	c.SetPath("/path")
+//	c.SetExpire(CookieExpireDelete)
+//	h.SetCookie(c)
+//	ReleaseCookie(c)
+//
+// 如果只删响应头中的 cookie，请使用 DelCookie。
+func (h *ResponseHeader) DelClientCookieBytes(key []byte) {
+	h.DelClientCookie(bytesconv.B2s(key))
+}
+
+// DelCookie 删除响应头中指定 key 下的 Cookie。
+//
+// 注意：DelCookie 无法删除客户端的 Cookie。
+// 如需可用 DelClientCookie 代替。
+func (h *ResponseHeader) DelCookie(key string) {
+	h.cookies = delAllArgs(h.cookies, key)
+}
+
+// DelCookieBytes 删除响应头中指定 key 下的 Cookie。
+//
+// 注意：DelCookie 无法删除客户端的 Cookie。
+// 如需可用 DelClientCookie 代替。
+func (h *ResponseHeader) DelCookieBytes(key []byte) {
+	h.cookies = delAllArgs(h.cookies, bytesconv.B2s(key))
+}
+
+// DisableNormalizing 禁用标头名称的规范化。
+//
+// 默认情况下，第一个字母和所有破折号后面的第一个字母会大写，其他字母小写。
+// 例如：
+//
+//   - CONNECTION -> Connection
+//   - conteNT-tYPE -> Content-Type
+//   - foo-bar-baz -> Foo-Bar-Baz
+//
+// 如非必要，不要禁用标头名称的规范化。
+func (h *ResponseHeader) DisableNormalizing() {
+	h.disableNormalizing = true
+}
+
+// FullCookie 返回完整的 Cookie 字节切片。
+func (h *ResponseHeader) FullCookie() []byte {
+	return h.Peek(consts.HeaderSetCookie)
+}
+
+// Get 返回指定 key 的标头值字符串。
+//
+// 返回值在下次调用 ResponseHeader 前一直有效。
+// 别储返回值引用，可以拷副本。
+func (h *ResponseHeader) Get(key string) string {
+	return string(h.Peek(key))
+}
+
+// GetAll 返回指定 key 的所有标头值的字符串切片，且并发安全、长期可用。
+func (h *ResponseHeader) GetAll(key string) []string {
+	res := make([]string, 0)
+	headers := h.PeekAll(key)
+	for _, header := range headers {
+		res = append(res, string(header))
+	}
+	return res
+}
+
+// GetCookies 获取响应头中 Cookie 的键值对切片。
+func (h *ResponseHeader) GetCookies() []argsKV {
+	return h.cookies
+}
+
+// GetHeaderLength 获取跟踪程序 tracer 的标头大小。
+func (h *ResponseHeader) GetHeaderLength() int {
+	return h.headerLength
+}
+
+// GetHeaders 获取所有标头切片。
+func (h *ResponseHeader) GetHeaders() []argsKV {
+	return h.h
+}
+
+// GetProtocol 获取响应头使用的 HTTP 协议。
+func (h *ResponseHeader) GetProtocol() string {
+	return h.protocol
+}
+
+// Header 返回整个响应头信息的字节切片形式。
+//
+// 返回值在下次调用 ResponseHeader 前一直有效。
+func (h *ResponseHeader) Header() []byte {
+	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
+	return h.bufKV.value
+}
+
+// InitContentLengthWithValue 初始化内容长度为指定的整数值。
+func (h *ResponseHeader) InitContentLengthWithValue(contentLength int) {
+	h.contentLength = contentLength
+}
+
+// IsDisableNormalizing 返回是否禁用了标头名称的规范化。
+func (h *ResponseHeader) IsDisableNormalizing() bool {
+	return h.disableNormalizing
+}
+
+// IsHTTP11 返回响应协议是否为 HTTP/1.1。
+func (h *ResponseHeader) IsHTTP11() bool {
+	return h.protocol == consts.HTTP11
+}
+
+// Len 返回设置的标头数量。
+// 即在 VisitAll 中 f 的调用次数。
+func (h *ResponseHeader) Len() int {
+	n := 0
+	h.VisitAll(func(k, v []byte) { n++ })
+	return n
+}
+
+// MustSkipContentLength 判断当前响应状态是否要设置内容长度标头。
+func (h *ResponseHeader) MustSkipContentLength() bool {
+	// 来自 http/1.1 协议规范：
+	// 所有 1xx (信息类), 204 (无内容), and 304 (未修改) 响应不得包含消息体
+	statusCode := h.StatusCode()
+
+	// 快处理路径。
+	if statusCode < 100 || statusCode == consts.StatusOK {
+		return false
+	}
+
+	// 慢处理路径。
+	return statusCode == consts.StatusNotModified || statusCode == consts.StatusNoContent || statusCode < 200
+}
+
+// NoDefaultContentType 不用默认的内容类型？
+func (h *ResponseHeader) NoDefaultContentType() bool {
+	return h.noDefaultContentType
+}
+
+// ParseSetCookie 解析指定 value 并附加到 Cookie。
+func (h *ResponseHeader) ParseSetCookie(value []byte) {
+	var kv *argsKV
+	h.cookies, kv = allocArg(h.cookies)
+	kv.key = getCookieKey(kv.key, value)
+	kv.value = append(kv.value[:0], value...)
+}
+
+// Peek 返回指定 key 的标头值。
+//
+// 返回值在下次调用 ResponseHeader 之前一直有效。
+// 别存返回值引用，可以拷副本。
+func (h *ResponseHeader) Peek(key string) []byte {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	return h.peek(k)
+}
+
+func (h *ResponseHeader) peek(key []byte) []byte {
+	switch string(key) {
+	case consts.HeaderContentType:
+		return h.ContentType()
+	case consts.HeaderContentEncoding:
+		return h.ContentEncoding()
+	case consts.HeaderServer:
+		return h.Server()
+	case consts.HeaderConnection:
+		if h.ConnectionClose() {
+			return bytestr.StrClose
+		}
+		return peekArgBytes(h.h, key)
+	case consts.HeaderContentLength:
+		return h.contentLengthBytes
+	case consts.HeaderSetCookie:
+		return appendResponseCookieBytes(nil, h.cookies)
+	case consts.HeaderTrailer:
+		return h.Trailer().GetBytes()
+	default:
+		return peekArgBytes(h.h, key)
+	}
+}
+
+// PeekAll 返回指定 key 按需规格化后的所有标头值切片。
+//
+// 返回值在 ReleaseResponse 之前一直有效，且可修改。
+//
+// 别存返回值引用，可用 ResponseHeader.GetAll(key)。
+func (h *ResponseHeader) PeekAll(key string) [][]byte {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	return h.peekAll(k)
+}
+
+func (h *ResponseHeader) peekAll(key []byte) [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	switch string(key) {
+	case consts.HeaderContentType:
+		if contentType := h.ContentType(); len(contentType) > 0 {
+			h.mulHeader = append(h.mulHeader, contentType)
+		}
+	case consts.HeaderContentEncoding:
+		if contentEncoding := h.ContentEncoding(); len(contentEncoding) > 0 {
+			h.mulHeader = append(h.mulHeader, contentEncoding)
+		}
+	case consts.HeaderServer:
+		if server := h.Server(); len(server) > 0 {
+			h.mulHeader = append(h.mulHeader, server)
+		}
+	case consts.HeaderConnection:
+		if h.ConnectionClose() {
+			h.mulHeader = append(h.mulHeader, bytestr.StrClose)
+		} else {
+			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		}
+	case consts.HeaderContentLength:
+		h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+	case consts.HeaderSetCookie:
+		h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+	default:
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+	}
+	return h.mulHeader
+}
+
+// PeekArgBytes 获取响应头中指定 key 的值。
+func (h *ResponseHeader) PeekArgBytes(key []byte) []byte {
+	return peekArgBytes(h.h, key)
+}
+
+// PeekLocation 获取响应头中 Location 的字节切片。
+func (h *ResponseHeader) PeekLocation() []byte {
+	return h.peek(bytestr.StrLocation)
+}
+
+// Reset 重置响应标头。
+func (h *ResponseHeader) Reset() {
+	h.disableNormalizing = false
+	h.Trailer().disableNormalizing = false
+	h.noDefaultContentType = false
+	h.noDefaultDate = false
+	h.ResetSkipNormalize()
+}
+
+// ResetConnectionClose 如果响应头中有 'Connection: close' 则进行重置。
+func (h *ResponseHeader) ResetConnectionClose() {
+	if h.connectionClose {
+		h.connectionClose = false
+		h.h = delAllArgsBytes(h.h, bytestr.StrConnection)
+	}
+}
+
+// ResetSkipNormalize 重置响应标头，但保留标头名的规范化设置。
+func (h *ResponseHeader) ResetSkipNormalize() {
+	h.protocol = ""
+	h.connectionClose = false
+
+	h.statusCode = 0
+	h.contentLength = 0
+	h.contentLengthBytes = h.contentLengthBytes[:0]
+	h.contentEncoding = h.contentEncoding[:0]
+
+	h.contentType = h.contentType[:0]
+	h.server = h.server[:0]
+
+	h.h = h.h[:0]
+	h.cookies = h.cookies[:0]
+	h.Trailer().ResetSkipNormalize()
+	h.mulHeader = h.mulHeader[:0]
+}
+
+// Server 返回服务器标头。
+func (h *ResponseHeader) Server() []byte {
+	return h.server
+}
+
+// Set 设置给定的 'key: value' 标头。
+//
+// 使用 Add 给同一个标头键设置多个值。
+func (h *ResponseHeader) Set(key, value string) {
+	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
+	h.SetCanonical(h.bufKV.key, h.bufKV.value)
+}
+
+// SetArgBytes 设置给定的 'key: value' 标头。
+func (h *ResponseHeader) SetArgBytes(key, value []byte, noValue bool) {
+	h.h = setArgBytes(h.h, key, value, noValue)
+}
+
+// SetBytesV 设置给定的 'key: value' 标头。
+//
+// 使用 AddBytesV 可以在同一个键下设置多个标头值。
+func (h *ResponseHeader) SetBytesV(key string, value []byte) {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	h.SetCanonical(k, value)
+}
+
+// SetCanonical 设置指定的 'key: value' 标头，假定该键为规范形式。
+func (h *ResponseHeader) SetCanonical(key, value []byte) {
+	if h.setSpecialHeader(key, value) {
+		return
+	}
+
+	h.h = setArgBytes(h.h, key, value, ArgsHasValue)
+}
+
+// SetConnectionClose 设置连接关闭响应头。
+func (h *ResponseHeader) SetConnectionClose(close bool) {
+	h.connectionClose = close
+}
+
+// SetContentEncoding 设置内容编码响应头。
+func (h *ResponseHeader) SetContentEncoding(contentEncoding string) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+}
+
+// SetContentEncodingBytes 设置内容编码响应头。
+func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+}
+
+// SetContentLength 设置响应头的内容长度。
+//
+// 值可能为负数
+// -1 意为 Transfer-Encoding: chunked，即传输编码被设置为分块传输。
+// -2 意为 Transfer-Encoding: identity，即传输编码被设置为自身传输（不压缩和修改）。
+func (h *ResponseHeader) SetContentLength(contentLength int) {
+	// 跳过无需设置长度的的响应码
+	if h.MustSkipContentLength() {
+		return
+	}
+
+	// 设置内容长度
+	h.contentLength = contentLength
+
+	// 设置内容长度字节切片，并根据长度设置传输编码
+	if contentLength >= 0 {
+		h.contentLengthBytes = bytesconv.AppendUint(h.contentLengthBytes[:0], contentLength)
+		h.h = delAllArgsBytes(h.h, bytestr.StrTransferEncoding)
+	} else {
+		h.contentLengthBytes = h.contentLengthBytes[:0]
+		value := bytestr.StrChunked
+		if contentLength == -2 {
+			h.SetConnectionClose(true)
+			value = bytestr.StrIdentity
+		}
+		h.h = setArgBytes(h.h, bytestr.StrTransferEncoding, value, ArgsHasValue)
+	}
+}
+
+// SetContentLengthBytes 直接设置内容长度标头字节切片。
+func (h *ResponseHeader) SetContentLengthBytes(contentLength []byte) {
+	h.contentLengthBytes = append(h.contentLengthBytes[:0], contentLength...)
+}
+
+// SetContentRange 设置 'Content-Range: bytes startPos-endPos/contentLength' 标头。
+func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
+	b := h.bufKV.value[:0]
+	b = append(b, bytestr.StrBytes...)
+	b = append(b, ' ')
+	b = bytesconv.AppendUint(b, startPos)
+	b = append(b, '-')
+	b = bytesconv.AppendUint(b, endPos)
+	b = append(b, '/')
+	b = bytesconv.AppendUint(b, contentLength)
+	h.bufKV.value = b
+
+	h.SetCanonical(bytestr.StrContentRange, h.bufKV.value)
+}
+
+// SetContentType 设置内容类型标头值。
+func (h *ResponseHeader) SetContentType(contentType string) {
+	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// SetContentTypeBytes 设置内容类型标头值。
+func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
+	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// SetCookie 设置指定的响应 Cookie。
+func (h *ResponseHeader) SetCookie(cookie *Cookie) {
+	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie(), ArgsHasValue)
+}
+
+// SetHeaderLength 设置跟踪程序 tracer 的标头大小。
+func (h *ResponseHeader) SetHeaderLength(length int) {
+	h.headerLength = length
+}
+
+// SetNoDefaultContentType 设置是否不用默认内容类型。
+func (h *ResponseHeader) SetNoDefaultContentType(b bool) {
+	h.noDefaultContentType = b
+}
+
+// SetProtocol 设置响应头使用的 HTTP 协议。
+func (h *ResponseHeader) SetProtocol(p string) {
+	h.protocol = p
+}
+
+// SetServerBytes 设置服务器响应头。
+func (h *ResponseHeader) SetServerBytes(server []byte) {
+	h.server = append(h.server[:0], server...)
+}
+
+// setSpecialHeader 处理特殊标头，若已处理则返回 true。
+func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
+	if len(key) == 0 {
+		return false
+	}
+
+	switch key[0] | 0x20 {
+	case 'c':
+		if utils.CaseInsensitiveCompare(bytestr.StrContentType, key) {
+			h.SetContentTypeBytes(value)
+			return true
+		} else if utils.CaseInsensitiveCompare(bytestr.StrContentLength, key) {
+			if contentLength, err := ParseContentLength(value); err == nil {
+				h.contentLength = contentLength
+				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
+			}
+			return true
+		} else if utils.CaseInsensitiveCompare(bytestr.StrContentEncoding, key) {
+			h.SetContentEncodingBytes(value)
+			return true
+		} else if utils.CaseInsensitiveCompare(bytestr.StrConnection, key) {
+			if bytes.Equal(bytestr.StrClose, value) {
+				h.SetConnectionClose(true)
+			} else {
+				h.ResetConnectionClose()
+				h.h = setArgBytes(h.h, key, value, ArgsHasValue)
+			}
+			return true
+		}
+	case 's':
+		if utils.CaseInsensitiveCompare(bytestr.StrServer, key) {
+			h.SetServerBytes(value)
+			return true
+		} else if utils.CaseInsensitiveCompare(bytestr.StrSetCookie, key) {
+			var kv *argsKV
+			h.cookies, kv = allocArg(h.cookies)
+			kv.key = getCookieKey(kv.key, value)
+			kv.value = append(kv.value[:0], value...)
+			return true
+		}
+	case 't':
+		if utils.CaseInsensitiveCompare(bytestr.StrTransferEncoding, key) {
+			// 传输编码是自动管理的。
+			return true
+		} else if utils.CaseInsensitiveCompare(bytestr.StrTrailer, key) {
+			h.Trailer().SetTrailers(value)
+			return true
+		}
+	case 'd':
+		if utils.CaseInsensitiveCompare(bytestr.StrDate, key) {
+			// 日期是自动管理的。
+			return true
+		}
+	}
+
+	return false
+}
+
+// SetStatusCode 设置响应状态码。
+func (h *ResponseHeader) SetStatusCode(statusCode int) {
+	checkWriteHeaderCode(statusCode)
+	h.statusCode = statusCode
+}
+
+func checkWriteHeaderCode(code int) {
+	// 目前，我们只对坏代码发出警告。
+	// 在未来，我们可能会阻止599以上或100以下的东西
+	if code < 100 || code > 599 {
+		hlog.SystemLogger().Warnf("无效状态码 %v，状态码不应低于 100 或超过 599\n"+
+			"了解详情 https://www.rfc-editor.org/rfc/rfc9110.html#name-status-codes", code)
+	}
+}
+
+// StatusCode 返回响应状态码。
+func (h *ResponseHeader) StatusCode() int {
+	if h.statusCode == 0 {
+		return consts.StatusOK
+	}
+	return h.statusCode
+}
+
+// Trailer 返回 HTTP 响应标头的挂车。
+func (h *ResponseHeader) Trailer() *Trailer {
+	if h.trailer == nil {
+		h.trailer = new(Trailer)
+	}
+	return h.trailer
+}
+
+// VisitAll 对每个标头应用函数 f。
+//
+// f 在返回后不得保留对键或值的引用，以防数据竞赛。
+// 如果需要保留密钥和/或值内容，请在返回之前复制它们。
+func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
+	if len(h.contentLengthBytes) > 0 {
+		f(bytestr.StrContentLength, h.contentLengthBytes)
+	}
+	contentType := h.ContentType()
+	if len(contentType) > 0 {
+		f(bytestr.StrContentType, contentType)
+	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		f(bytestr.StrContentEncoding, contentEncoding)
+	}
+	server := h.Server()
+	if len(server) > 0 {
+		f(bytestr.StrServer, server)
+	}
+	if len(h.cookies) > 0 {
+		visitArgs(h.cookies, func(k, v []byte) {
+			f(bytestr.StrSetCookie, v)
+		})
+	}
+	if !h.Trailer().Empty() {
+		f(bytestr.StrTrailer, h.Trailer().GetBytes())
+	}
+	visitArgs(h.h, f)
+	if h.ConnectionClose() {
+		f(bytestr.StrConnection, bytestr.StrClose)
+	}
+}
+
+// VisitAllCookie 对每个响应 cookie 应用函数 f。
+//
+// f 在返回后不得保留对键或值的引用，以防数据竞赛。
+func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
+	visitArgs(h.cookies, f)
+}
+
+func ParseContentLength(b []byte) (int, error) {
+	v, n, err := bytesconv.ParseUintBuf(b)
+	if err != nil {
+		return -1, err
+	}
+	if n != len(b) {
+		return -1, errs.NewPublic("Content-Length末尾出现非数字字符")
+	}
+	return v, nil
+}
+
+// UpdateServerDate 每秒更新一次服务器时间原子值。
+func UpdateServerDate() {
+	refreshServerDate()
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			refreshServerDate()
+		}
+	}()
+}
+
+func refreshServerDate() {
+	b := bytesconv.AppendHTTPDate(make([]byte, 0, len(http.TimeFormat)), time.Now())
+	ServerDate.Store(b)
+}
+
 func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	var s cookieScanner
 	s.b = src
@@ -925,47 +1733,4 @@ func appendHeaderLine(dst, key, value []byte) []byte {
 	dst = append(dst, bytestr.StrColonSpace...)
 	dst = append(dst, value...)
 	return append(dst, bytestr.StrCRLF...)
-}
-
-func ParseContentLength(b []byte) (int, error) {
-	v, n, err := bytesconv.ParseUintBuf(b)
-	if err != nil {
-		return -1, err
-	}
-	if n != len(b) {
-		return -1, errs.NewPublic("Content-Length末尾出现非数字字符")
-	}
-	return v, nil
-}
-
-// ResponseHeader 表示 HTTP 响应头。
-//
-// 禁止复制 ResponseHeader 实例，而是通过创建新实例并 CopyTo 来替代。
-//
-// ResponseHeader 实例 *不能* 用于多协程，并发不是安全的。
-type ResponseHeader struct {
-	noCopy nocopy.NoCopy
-
-	disableNormalizing   bool // 禁用标头名称规范化？
-	connectionClose      bool // 连接已关闭？
-	noDefaultContentType bool // 不实用默认内容类型？
-	noDefaultDate        bool // 不用默认日期？
-
-	statusCode         int
-	contentLength      int
-	contentLengthBytes []byte
-	contentEncoding    []byte
-
-	contentType []byte
-	server      []byte
-	mulHeader   [][]byte
-	protocol    string
-
-	h       []argsKV
-	bufKV   argsKV
-	trailer *Trailer
-
-	cookies []argsKV
-
-	headerLength int
 }
