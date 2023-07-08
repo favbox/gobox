@@ -275,7 +275,7 @@ func (h *RequestHeader) FullCookie() []byte {
 	return h.Peek(consts.HeaderCookie)
 }
 
-// Get 返回指定 key 的标头值字符串。
+// Get 返回指定 key 的标头值字符串形式。
 //
 // 返回的值在下一次调用 RequestHeader 之前一直有效。
 // 不要存储对返回值的引用，可以拷贝副本。
@@ -457,7 +457,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 	return nil
 }
 
-// Peek 返回指定 key 按需规格化后的标头值字节切片。
+// Peek 返回指定 key 的标头值字节切片形式。
 //
 // 返回的值在下一次调用 RequestHeader 之前一直有效。
 // 不要存储对返回值的引用，可以拷贝副本。
@@ -495,11 +495,11 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	}
 }
 
-// PeekAll 返回指定 key 按需规格化后的所有标头值切片。
+// PeekAll 返回指定 key 对应的所有标头值。
 //
 // 返回值在 ReleaseRequest 之前一直有效，且可修改。
 //
-// 不要存储对返回值的引用，请改用 RequestHeader.GetAll(key)。
+// 别存返回值引用，请用 RequestHeader.GetAll(key)。
 func (h *RequestHeader) PeekAll(key string) [][]byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
 	return h.peekAll(k)
@@ -572,7 +572,7 @@ func (h *RequestHeader) RawHeaders() []byte {
 func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
 	if len(requestURI) == 0 {
-		requestURI = bytestr.StrSlashSlash
+		requestURI = bytestr.StrSlash
 	}
 	return requestURI
 }
@@ -653,14 +653,14 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 
 // SetBytesKV 设置指定字节切片类型的 'key: value' 标头。
 //
-// 使用 AddBytesKV 为相同标头键设置多个值。
+// 使用 AddArgBytes 为相同标头键设置多个值。
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	utils.NormalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
 	h.SetCanonical(h.bufKV.key, value)
 }
 
-// SetCanonical 设置指定的 'key: value' 标头，假定该键为规范形式。
+// SetCanonical 设置指定规范键名后的 'key: value' 标头。
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1461,9 +1461,10 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 
 // SetContentLength 设置响应头的内容长度。
 //
-// 值可能为负数
-// -1 意为 Transfer-Encoding: chunked，即传输编码被设置为分块传输。
-// -2 意为 Transfer-Encoding: identity，即传输编码被设置为自身传输（不压缩和修改）。
+// 值可能为负数:
+//
+//	-1 意为 Transfer-Encoding: chunked，即传输编码被设置为分块传输。
+//	-2 意为 Transfer-Encoding: identity，即传输编码被设置为自身传输（不压缩和修改）。
 func (h *ResponseHeader) SetContentLength(contentLength int) {
 	// 跳过无需设置长度的的响应码
 	if h.MustSkipContentLength() {

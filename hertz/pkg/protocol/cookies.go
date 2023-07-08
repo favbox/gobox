@@ -146,12 +146,12 @@ func (c *Cookie) Key() []byte {
 	return c.key
 }
 
-// SetKey 设置 Cookie 的名称。
+// SetKey 设置 Cookie 的键名。
 func (c *Cookie) SetKey(key string) {
 	c.key = append(c.key[:0], key...)
 }
 
-// SetKeyBytes 设置 Cookie 的名称。
+// SetKeyBytes 设置 Cookie 的键名。
 func (c *Cookie) SetKeyBytes(key []byte) {
 	c.key = append(c.key[:0], key...)
 }
@@ -477,8 +477,8 @@ func getCookieKey(dst, src []byte) []byte {
 func warnIfInvalid(value []byte) bool {
 	for i := range value {
 		if bytesconv.ValidCookieValueTable[value[i]] == 0 {
-			hlog.SystemLogger().Warnf("Cookie.Value 有无效字节 %q，"+
-				"可能会导致与用户代理UA的兼容性问题", value[i])
+			hlog.SystemLogger().Warnf("Cookie.Value 包含无效字节 %q，"+
+				"可能导致用户代理的兼容问题", value[i])
 		}
 	}
 	return true

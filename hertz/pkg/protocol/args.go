@@ -375,6 +375,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 // 更新或追加参数切片 args 中指定 key 的 value。
 func setArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	n := len(args)
+	// 更新到已有的同名键下
 	for i := 0; i < n; i++ {
 		kv := &args[i]
 		if key == string(kv.key) {
@@ -387,6 +388,7 @@ func setArg(args []argsKV, key, value string, noValue bool) []argsKV {
 			return args
 		}
 	}
+	// 追加新的键值对
 	return appendArg(args, key, value, noValue)
 }
 
