@@ -10,7 +10,7 @@ const (
 	minBitSize = 6 // 2**6=64 是CPU缓存行大小
 	steps      = 20
 
-	minSize = 1 << minBitSize
+	minSize = 1 << minBitSize // 规避 GC 的切片容量上限常量
 	maxSize = 1 << (minBitSize + steps - 1)
 
 	calibrateCallsThreshold = 42000

@@ -457,7 +457,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 	return nil
 }
 
-// Peek 返回指定 key 的标头值字节切片形式。
+// Peek 返回指定 key 的标头值字节切片形式。减少类型转换成本。
 //
 // 返回的值在下一次调用 RequestHeader 之前一直有效。
 // 不要存储对返回值的引用，可以拷贝副本。
@@ -466,7 +466,7 @@ func (h *RequestHeader) Peek(key string) []byte {
 	return h.peek(k)
 }
 
-// 返回指定 key （不考虑规格化）对应的标头值字节切片。
+// 返回指定 key 对应的标头值字节切片。
 // 同时对常用几个 key 提前判断并返回。
 func (h *RequestHeader) peek(key []byte) []byte {
 	switch string(key) {
@@ -698,7 +698,7 @@ func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
 
-// SetCookie 设置 'key: value' cookies。
+// SetCookie 附加单个 'key: value' 到请求头的 cookies。
 func (h *RequestHeader) SetCookie(key, value string) {
 	h.collectCookies()
 	h.cookies = setArg(h.cookies, key, value, ArgsHasValue)

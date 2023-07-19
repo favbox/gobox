@@ -31,15 +31,18 @@ var uriPool = &sync.Pool{
 	},
 }
 
+// URI 是完全限定的网址结构体。
+//
+// 提供了协议、主机、路径、查询字符串、哈希等一系列信息的快捷读写方法。
 type URI struct {
 	noCopy nocopy.NoCopy
 
-	pathOriginal []byte
 	scheme       []byte
+	host         []byte
+	pathOriginal []byte
 	path         []byte
 	queryString  []byte
 	hash         []byte
-	host         []byte
 
 	queryArgs       Args
 	parsedQueryArgs bool

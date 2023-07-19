@@ -11,6 +11,7 @@ var (
 	ErrConnectionClosed = errors.New("连接已关闭")
 	ErrTimeout          = errors.New("超时")
 	ErrWriteTimeout     = errors.New("写超时")
+	ErrNoMultipartForm  = errors.New("请求的 Content-Type 无 multipart/form-data")
 )
 
 type ErrorType uint64

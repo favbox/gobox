@@ -20,11 +20,12 @@ const (
 	defaultReadBufferSize     = 4 * 1024
 )
 
-// Option 是唯一可用于设置 Options 的结构体。
+// Option 是配置项 Options 唯一的配置方法结构体。
 type Option struct {
 	F func(o *Options)
 }
 
+// Options 是配置项的结构体。
 type Options struct {
 	// 保活时长。当空闲连接超过这个时长，服务器会发送保活数据包以确保其为有效连接。
 	//
@@ -96,12 +97,14 @@ type Options struct {
 	AutoReloadInterval time.Duration
 }
 
+// Apply 将指定的一组配置方法 opts 应用到配置项上。
 func (o *Options) Apply(opts []Option) {
 	for _, opt := range opts {
 		opt.F(o)
 	}
 }
 
+// NewOptions 创建配置项并应用指定的配置函数。
 func NewOptions(opts []Option) *Options {
 	options := &Options{
 		KeepAliveTimeout:      defaultKeepAliveTimeout,

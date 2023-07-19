@@ -29,7 +29,7 @@ func (kv *argsKV) GetValue() []byte {
 	return kv.value
 }
 
-// Args 键值对参数。
+// Args 用于维护键值对参数。
 type Args struct {
 	noCopy nocopy.NoCopy
 
