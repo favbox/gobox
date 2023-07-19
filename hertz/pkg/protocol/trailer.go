@@ -49,7 +49,7 @@ func (t *Trailer) Set(key, value string) error {
 
 // Add 添加指定键的值。
 //
-// Add 可添加多个相同键的标头，如需将指定键设置为单个标头可使用 Set。
+// Add 支持单键多值，如需单键单值可使用 Set。
 //
 // 如果键被 RFC 7230 第 4.1.2 节禁用，Add 将返回错误。
 func (t *Trailer) Add(key, value string) error {
@@ -183,6 +183,15 @@ func IsBadTrailer(key []byte) bool {
 	case 'a':
 		return utils.CaseInsensitiveCompare(key, bytestr.StrAuthorization)
 	case 'c':
+		if len(key) >= len(consts.HeaderContentType) && utils.CaseInsensitiveCompare(key[:8], bytestr.StrContentType[:8]) {
+			// skip compare prefix 'Content-'
+			return utils.CaseInsensitiveCompare(key[8:], bytestr.StrContentEncoding[8:]) ||
+				utils.CaseInsensitiveCompare(key[8:], bytestr.StrContentLength[8:]) ||
+				utils.CaseInsensitiveCompare(key[8:], bytestr.StrContentType[8:]) ||
+				utils.CaseInsensitiveCompare(key[8:], bytestr.StrContentRange[8:])
+		}
+		return utils.CaseInsensitiveCompare(key, bytestr.StrConnection)
+	case 'e':
 		return utils.CaseInsensitiveCompare(key, bytestr.StrExpect)
 	case 'h':
 		return utils.CaseInsensitiveCompare(key, bytestr.StrHost)

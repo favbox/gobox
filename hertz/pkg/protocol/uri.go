@@ -280,15 +280,15 @@ func (u *URI) PathOriginal() []byte {
 
 // Reset 清空 URI。
 func (u *URI) Reset() {
-	u.pathOriginal = u.pathOriginal[:0]
 	u.scheme = u.scheme[:0]
+	u.host = u.host[:0]
 	u.path = u.path[:0]
+	u.pathOriginal = u.pathOriginal[:0]
 	u.queryString = u.queryString[:0]
 	u.hash = u.hash[:0]
 	u.username = u.username[:0]
 	u.password = u.password[:0]
 
-	u.host = u.host[:0]
 	u.queryArgs.Reset()
 	u.parsedQueryArgs = false
 	u.DisablePathNormalizing = false

@@ -266,11 +266,13 @@ func (c *Cookie) SetSameSite(mode CookieSameSite) {
 }
 
 // 返回 Cookie 的字符串表达形式。
+//
+// 注：没有 maxAge 到期秒数，则取 expire 到期时间。
 func (c *Cookie) String() string {
 	return string(c.Cookie())
 }
 
-// Parse 解析 Set-Cookie 头信息。
+// Parse 解析指定 src 到 Cookie。
 func (c *Cookie) Parse(src string) error {
 	c.buf = append(c.buf[:0], src...)
 	return c.ParseBytes(c.buf)
@@ -479,6 +481,7 @@ func warnIfInvalid(value []byte) bool {
 		if bytesconv.ValidCookieValueTable[value[i]] == 0 {
 			hlog.SystemLogger().Warnf("Cookie.Value 包含无效字节 %q，"+
 				"可能导致用户代理的兼容问题", value[i])
+			return false
 		}
 	}
 	return true

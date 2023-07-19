@@ -20,7 +20,7 @@ import (
 //
 // 禁止复制 RequestHeader 实例，而是通过创建新实例并 CopyTo 来替代。
 //
-// RequestHeader 实例 *不能* 用于多协程，并发不是安全的。
+// # RequestHeader 实例不能用于多协程，并发不是安全的。
 type RequestHeader struct {
 	noCopy nocopy.NoCopy
 
@@ -568,7 +568,7 @@ func (h *RequestHeader) RawHeaders() []byte {
 	return h.rawHeaders
 }
 
-// RequestURI 返回 HTTP 的 RequestURI。
+// RequestURI 返回完整的请求路径，包括查询参数及后续信息。
 func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
 	if len(requestURI) == 0 {
@@ -905,7 +905,7 @@ var (
 //
 // 禁止复制 ResponseHeader 实例，而是通过创建新实例并 CopyTo 来替代。
 //
-// ResponseHeader 实例 *不能* 用于多协程，并发不是安全的。
+// # ResponseHeader 实例不能用于多协程，并发不是安全的。
 type ResponseHeader struct {
 	noCopy nocopy.NoCopy
 
@@ -1261,7 +1261,7 @@ func (h *ResponseHeader) Len() int {
 	return n
 }
 
-// MustSkipContentLength 判断当前响应状态是否要设置内容长度标头。
+// MustSkipContentLength 根据状态码判断是否跳过内容长度标头。
 func (h *ResponseHeader) MustSkipContentLength() bool {
 	// 来自 http/1.1 协议规范：
 	// 所有 1xx (信息类), 204 (无内容), and 304 (未修改) 响应不得包含消息体

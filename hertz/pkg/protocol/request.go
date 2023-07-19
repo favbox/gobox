@@ -26,10 +26,10 @@ import (
 var (
 	errMissingFile = errors.NewPublic("http: 无此文件")
 
-	// 减少 GC 的请求体缓冲池
+	// 请求主体缓冲池，减少 GC
 	requestBodyPool bytebufferpool.Pool
 
-	// 减少 GC 的请求实例池
+	// 请求实例池，减少 GC
 	requestPool sync.Pool
 )
 
@@ -44,9 +44,17 @@ type noBody struct{}
 func (noBody) Read([]byte) (int, error) { return 0, nil }
 func (noBody) Close() error             { return nil }
 
+// Request 表示 HTTP 请求。
+//
+// 禁止拷贝 Request 实例。替代方法为创建新实例或使用 CopyTo。
+//
+// # Request 实例不能用于并发协程。
 type Request struct {
 	noCopy nocopy.NoCopy
 
+	// Request 标头
+	//
+	// 禁止值拷贝 Header。可使用 Header 指针。
 	Header RequestHeader
 
 	uri      URI
@@ -75,19 +83,17 @@ type Request struct {
 
 // File 表示 multipart 请求的文件信息结构体。
 type File struct {
-	io.Reader
-
 	Name      string // 文件路径
 	ParamName string // 文件名称
+	io.Reader
 }
 
 // MultipartField 表示 multipart 请求中自定义数据部分的结构体。
 type MultipartField struct {
-	io.Reader
-
 	Param       string
 	FileName    string
 	ContentType string
+	io.Reader
 }
 
 type requestBodyWriter struct {
@@ -99,23 +105,23 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// AppendBody 追加 p 至请求体的字节缓冲区。
+// AppendBody 追加 p 至请求主体的字节缓冲区。
 //
-// 函数返回后，对 p 的复用是安全的。
+// 函数返回后，复用 p 是安全的。
 func (req *Request) AppendBody(p []byte) {
 	req.RemoveMultipartFormFiles()
 	_ = req.CloseBodyStream()
 	_, _ = req.BodyBuffer().Write(p)
 }
 
-// AppendBodyString 追加 s 至请求体的字节缓冲区。
+// AppendBodyString 追加 s 至请求的主体字节缓冲区。
 func (req *Request) AppendBodyString(s string) {
 	req.RemoveMultipartFormFiles()
 	_ = req.CloseBodyStream()
 	_, _ = req.BodyBuffer().WriteString(s)
 }
 
-// BasicAuth 如果请求使用了 HTTP 基本验证，可以返回请求 Authorization 中的用户名密码。
+// BasicAuth 返回 Authorization 请求头中的用户名密码。
 func (req *Request) BasicAuth() (username, password string, ok bool) {
 	// 使用 Peek 降低类型转换成本
 	auth := req.Header.Peek(consts.HeaderAuthorization)
@@ -151,14 +157,13 @@ func parseBasicAuth(auth []byte) (username, password string, ok bool) {
 	return cs[:s], cs[s+1:], true
 }
 
-// Body 返回请求体。
-// 如果获取失败则返回 nil。
+// Body 返回请求的主体。
 func (req *Request) Body() []byte {
 	body, _ := req.BodyE()
 	return body
 }
 
-// BodyE 返回请求体和错误。
+// BodyE 返回请求的主体和错误。
 // 如果获取失败则返回 nil。
 func (req *Request) BodyE() ([]byte, error) {
 	if req.bodyRaw != nil {
@@ -185,6 +190,7 @@ func (req *Request) BodyE() ([]byte, error) {
 	return req.BodyBytes(), nil
 }
 
+// BodyBytes 返回请求的主体缓冲区的字节切片形式。
 func (req *Request) BodyBytes() []byte {
 	if req.bodyRaw != nil {
 		return req.bodyRaw
@@ -195,6 +201,9 @@ func (req *Request) BodyBytes() []byte {
 	return req.body.B
 }
 
+// BodyBuffer 返回请求的主体缓冲区。
+//
+// 如果为空，则从请求主体池中获取一个新字节缓冲区。
 func (req *Request) BodyBuffer() *bytebufferpool.ByteBuffer {
 	if req.body == nil {
 		req.body = requestBodyPool.Get()
@@ -203,6 +212,7 @@ func (req *Request) BodyBuffer() *bytebufferpool.ByteBuffer {
 	return req.body
 }
 
+// BodyStream 返回请求的主体流。
 func (req *Request) BodyStream() io.Reader {
 	if req.bodyStream == nil {
 		req.bodyStream = NoBody
@@ -210,13 +220,13 @@ func (req *Request) BodyStream() io.Reader {
 	return req.bodyStream
 }
 
-// BodyWriter 返回用于填充请求体的编写器。
+// BodyWriter 返回请求的主体编写器。
 func (req *Request) BodyWriter() io.Writer {
 	req.w.r = req
 	return &req.w
 }
 
-// BodyWriteTo 将请求体写入 w。
+// BodyWriteTo 将请求主体写入 w。
 func (req *Request) BodyWriteTo(w io.Writer) error {
 	if req.IsBodyStream() {
 		zw := network.NewWriter(w)
@@ -231,7 +241,7 @@ func (req *Request) BodyWriteTo(w io.Writer) error {
 	return err
 }
 
-// CloseBodyStream 关闭请求体数据流。
+// CloseBodyStream 关闭请求的主体数据流。
 func (req *Request) CloseBodyStream() error {
 	if req.bodyStream == nil {
 		return nil
@@ -245,17 +255,18 @@ func (req *Request) CloseBodyStream() error {
 	return err
 }
 
-// ConnectionClose 若标头 'Connection: close' 已设定则返回真。
+// ConnectionClose 返回请求头是否已设置 'Connection: close'。
 func (req *Request) ConnectionClose() bool {
 	return req.Header.ConnectionClose()
 }
 
+// ConstructBodyStream 同时设置请求的主体字节缓冲区和主体流。
 func (req *Request) ConstructBodyStream(body *bytebufferpool.ByteBuffer, bodyStream io.Reader) {
 	req.body = body
 	req.bodyStream = bodyStream
 }
 
-// CopyTo 拷贝正文流之外的请求内容到 dst。
+// CopyTo 拷贝主体流之外的请求信息到 dst。
 func (req *Request) CopyTo(dst *Request) {
 	req.CopyToSkipBody(dst)
 	if req.bodyRaw != nil {
@@ -289,7 +300,7 @@ func (req *Request) CopyToSkipBody(dst *Request) {
 	// 无需拷贝 multipartForm - 它会在第一次被调用时自动重建。
 }
 
-// FormFile 返回指定表单 name 的第一个文件。
+// FormFile 返回表单中指定 name 的第一个文件头。
 func (req *Request) FormFile(name string) (*multipart.FileHeader, error) {
 	mf, err := req.MultipartForm()
 	if err != nil {
@@ -319,12 +330,12 @@ func (req *Request) IsURIParsed() bool {
 	return req.parsedURI
 }
 
-// IsBodyStream 判断请求体是否由 SetBodyStream 设置。
+// IsBodyStream 主体是由 SetBodyStream 设置的吗？
 func (req *Request) IsBodyStream() bool {
 	return req.bodyStream != nil && req.bodyStream != NoBody
 }
 
-// MayContinue 若请求头包含 'Expect: 100-continue' 则返回真。
+// MayContinue 返回请求头是否包含 'Expect: 100-continue'。
 //
 // 若返回真，调用者必须执行一个如下动作：
 //
@@ -350,7 +361,7 @@ func (req *Request) MultipartFiles() []*File {
 	return req.multipartFiles
 }
 
-// MultipartForm 返回请求表单。
+// MultipartForm 解析请求主体中的请求表单。
 //
 // 若请求的内容类型不是 'multipart/form-data' 则返回 errors.ErrNoMultipartForm。
 //
@@ -374,7 +385,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 			// 这里不关心内存使用情况
 			var err error
 			if body, err = compress.AppendGunzipBytes(nil, body); err != nil {
-				return nil, fmt.Errorf("无法解压缩请求体：%s", err)
+				return nil, fmt.Errorf("无法解压缩请求主体：%s", err)
 			}
 		} else if len(ce) > 0 {
 			return nil, fmt.Errorf("不支持的内容编码：%q", ce)
@@ -386,9 +397,9 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 			bodyStream = io.LimitReader(bodyStream, int64(req.Header.contentLength))
 		}
 		if bytes.Equal(ce, bytestr.StrGzip) {
-			// Do not care about memory usage here.
+			// 这里不关心内存使用情况
 			if bodyStream, err = gzip.NewReader(bodyStream); err != nil {
-				return nil, fmt.Errorf("无法解压缩请求体：%w", err)
+				return nil, fmt.Errorf("无法解压缩请求主体：%w", err)
 			}
 		} else if len(ce) > 0 {
 			return nil, fmt.Errorf("不支持的内容编码：%q", ce)
@@ -477,7 +488,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 	req.multipartFields = nil
 }
 
-// RequestURI 返回完全限定的请求网址。
+// RequestURI 返回完整请求路径，包括请求参数及后续信息。
 func (req *Request) RequestURI() []byte {
 	return req.Header.RequestURI()
 }
@@ -501,7 +512,10 @@ func (req *Request) ResetSkipHeader() {
 	req.isTLS = false
 }
 
-// ResetBody 重置请求体。
+// ResetBody 重置请求的主体。
+//
+//   - 若主体字节数 ≤ 保留值，仅重置不清空
+//   - 若主体字节数 ＞ 保留值，清空并返回池
 func (req *Request) ResetBody() {
 	req.bodyRaw = nil
 	req.RemoveMultipartFormFiles()
@@ -543,7 +557,7 @@ func (req *Request) SetBasicAuth(username, password string) {
 	req.SetHeader(consts.HeaderAuthorization, "Basic "+encodeStr)
 }
 
-// SetBody 设置请求体。
+// SetBody 设置请求主体。
 //
 // 在函数返回后，重新使用 body 参数是安全的。
 func (req *Request) SetBody(body []byte) {
@@ -552,37 +566,37 @@ func (req *Request) SetBody(body []byte) {
 	req.BodyBuffer().Set(body)
 }
 
-// SetBodyString 设置请求体。
+// SetBodyString 设置请求主体。
 func (req *Request) SetBodyString(body string) {
 	req.RemoveMultipartFormFiles()
 	_ = req.CloseBodyStream()
 	req.BodyBuffer().SetString(body)
 }
 
-// SetBodyRaw 设置请求体，但不复制它。
+// SetBodyRaw 设置请求主体，但不复制它。
 //
-// 基于此，内容体不可改变。
+// 基于此，内容体不可修改。
 func (req *Request) SetBodyRaw(body []byte) {
 	req.ResetBody()
 	req.bodyRaw = body
 }
 
-// SetBodyStream 设置请求体的流和大小（可选）。
+// SetBodyStream 设置请求的主体流和大小（可选）。
 //
 // 若 bodySize >= 0，那么在返回 io.EOF 之前，bodyStream 必须提供确切的 bodySize 字节。
 //
 // 若 bodySize < 0，那么, 则读取 bodyStream 直至 io.EOF。
 //
-// 若 bodyStream 实现了 io.Closer，则读取完所有请求体数据后调用 bodyStream.Close()。
+// 若 bodyStream 实现了 io.Closer，则读取完请求的所有主体数据后调用 bodyStream.Close()。
 //
-// 注意：GET 和 HEAD 请求不能有请求体。
+// 注意：GET 和 HEAD 请求不能有请求主体。
 func (req *Request) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	req.ResetBody()
 	req.bodyStream = bodyStream
 	req.Header.SetContentLength(bodySize)
 }
 
-// SetConnectionClose 设置连接关闭 'Connection: close' 标头。
+// SetConnectionClose 设置连接关闭标头。
 func (req *Request) SetConnectionClose() {
 	req.Header.SetConnectionClose(true)
 }
@@ -615,6 +629,15 @@ func (req *Request) SetFiles(files map[string]string) {
 			ParamName: f,
 		})
 	}
+}
+
+// SetFileReader 附加单个带有 io.Reader 的文件到文件上传表单。
+func (req *Request) SetFileReader(param, fileName string, reader io.Reader) {
+	req.multipartFiles = append(req.multipartFiles, &File{
+		Name:      fileName,
+		ParamName: param,
+		Reader:    reader,
+	})
 }
 
 // SetFormData 设置 x-www-form-urlencoded 请求参数。
@@ -660,12 +683,12 @@ func (req *Request) SetIsTLS(isTLS bool) {
 	req.isTLS = isTLS
 }
 
-// SetMaxKeepBodySize 设置请求体的最大保留字节数。
+// SetMaxKeepBodySize 设置请求的主体最大保留字节数。
 func (req *Request) SetMaxKeepBodySize(n int) {
 	req.maxKeepBodySize = n
 }
 
-// SetMethod 设置请求方法。
+// SetMethod 设置请求的方法。
 func (req *Request) SetMethod(method string) {
 	req.Header.SetMethod(method)
 }
@@ -724,7 +747,7 @@ func (req *Request) SwapBody(body []byte) []byte {
 	if req.IsBodyStream() {
 		bb.Reset()
 		_, err := utils.CopyZeroAlloc(zw, req.bodyStream)
-		req.CloseBodyStream() //nolint:errcheck
+		_ = req.CloseBodyStream()
 		if err != nil {
 			bb.Reset()
 			bb.SetString(err.Error())
@@ -744,7 +767,7 @@ func (req *Request) URI() *URI {
 	return &req.uri
 }
 
-// AcquireRequest 从请求池返回一个空的请求实例。
+// AcquireRequest 从请求池获取空请求实例。
 //
 // 当实例不再用时，调用 ReleaseRequest 进行释放，以减少 GC，提高性能。
 func AcquireRequest() *Request {
@@ -797,4 +820,13 @@ func NewRequest(method, url string, body io.Reader) *Request {
 	}
 
 	return req
+}
+
+// SwapRequestBody 交换两个请求的主体。
+func SwapRequestBody(a, b *Request) {
+	a.body, b.body = b.body, a.body
+	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
+	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
+	a.multipartFields, b.multipartFields = b.multipartFields, a.multipartFields
+	a.multipartFiles, b.multipartFiles = b.multipartFiles, a.multipartFiles
 }

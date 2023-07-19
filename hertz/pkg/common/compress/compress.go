@@ -23,11 +23,16 @@ var (
 	realGzipWriterPoolMap      = newCompressWriterPoolMap()
 )
 
-// AppendGunzipBytes 附加压缩后的 src 到 dst 并返回。
+// AppendGunzipBytes 解压 src 到 dst 并返回。
 func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
 	w := &byteSliceWriter{dst}
 	_, err := WriteGunzip(w, src)
 	return w.b, err
+}
+
+// AppendGzipBytes 压缩 src 并附加到 dst，然后返回。
+func AppendGzipBytes(dst, src []byte) []byte {
+	return AppendGzipBytesLevel(dst, src, CompressDefaultCompression)
 }
 
 // AppendGzipBytesLevel 附加压缩后的 src 到 dst 并返回（使用指定的压缩级别）。
@@ -45,7 +50,7 @@ func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
 	return w.b
 }
 
-// WriteGzipLevel 将压缩后的 p 字节切片写入 w（使用指定压缩级别）并返回写入 w 的压缩量。
+// WriteGzipLevel 压缩 p 并写入 w（使用指定压缩级别），返回写入 w 的压缩量。
 //
 // 支持的压缩级别为：
 //
@@ -75,7 +80,7 @@ func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
-// WriteGunzip 附加压缩后的 src 到 w，并返回未写入 w 的未压缩字节数。
+// WriteGunzip 解压 src 到 w，并返回未写入的字节数。
 func WriteGunzip(w io.Writer, p []byte) (int, error) {
 	r := &byteSliceReader{p}
 	zr, err := AcquireGzipReader(r)
@@ -107,7 +112,7 @@ func AcquireStacklessGzipWriter(w io.Writer, level int) stackless.Writer {
 }
 
 func ReleaseStacklessGzipWriter(sw stackless.Writer, level int) {
-	sw.Close()
+	_ = sw.Close()
 	nLevel := normalizeCompressLevel(level)
 	p := stacklessGzipWriterPoolMap[nLevel]
 	p.Put(sw)
@@ -170,7 +175,7 @@ func nonblockingWriteGzip(ctxv any) {
 }
 
 func releaseRealGzipWriter(zw *gzip.Writer, level int) {
-	zw.Close()
+	_ = zw.Close()
 	nLevel := normalizeCompressLevel(level)
 	p := realGzipWriterPoolMap[nLevel]
 	p.Put(zw)
