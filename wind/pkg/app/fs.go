@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,12 +10,13 @@ import (
 	"time"
 
 	"github.com/favbox/gosky/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
 	"github.com/favbox/gosky/wind/pkg/common/utils"
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
-// PathRewriteFunc 必须返回基于任意上下文信息的新请求路径。
+// PathRewriteFunc 必须返回基于上下文信息的新请求路径。
 //
 // 用于将当前请求路径转换为相对于 FS.Root 的本地文件系统路径。
 //
@@ -137,6 +140,29 @@ type fsHandler struct {
 	smallFileReaderPool sync.Pool
 }
 
+func (h *fsHandler) handleRequest(c context.Context, ctx *RequestContext) {
+	var path []byte
+	if h.pathRewrite != nil {
+		path = h.pathRewrite(ctx)
+	} else {
+		path = ctx.Path()
+	}
+	path = stripTrailingSlashes(path)
+
+	if n := bytes.IndexByte(path, 0); n >= 0 {
+		hlog.SystemLogger().Errorf("无法提供零字节的路径，位于 position=%d, path=%q", n, path)
+		ctx.AbortWithMsg("你是黑客吗？", consts.StatusBadRequest)
+		return
+	}
+}
+
+func stripTrailingSlashes(path []byte) []byte {
+	for len(path) > 0 && path[len(path)-1] == '/' {
+		path = path[:len(path)-1]
+	}
+	return path
+}
+
 type fsFile struct {
 	h             *fsHandler
 	f             *os.File
@@ -151,7 +177,7 @@ type fsFile struct {
 	t            time.Time
 	readersCount int
 
-	bigFiles     []*bigFileReader
+	bigFiles     []*fsBigFileReader
 	bigFilesLock sync.Mutex
 }
 
@@ -208,7 +234,7 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 		return nil, fmt.Errorf("无法打开已打开的文件：%s", err)
 	}
 
-	return &bigFileReader{
+	return &fsBigFileReader{
 		f:  f,
 		ff: ff,
 		r:  f,
@@ -221,7 +247,12 @@ func (ff *fsFile) smallFileReader() io.Reader {
 		v = &fsSmallFileReader{}
 	}
 	r := v.(*fsSmallFileReader)
-
+	r.ff = ff
+	r.endPos = ff.contentLength
+	if r.startPos > 0 {
+		panic("BUG: 发现了 startPos 非空的 fsSmallFileReader")
+	}
+	return r
 }
 
 func (ff *fsFile) decReadersCount() {
@@ -237,15 +268,14 @@ type byteRangeUpdater interface {
 	UpdateByteRange(startPos, endPos int) error
 }
 
-// 尝试按需发送大文件。
-type bigFileReader struct {
+type fsBigFileReader struct {
 	f  *os.File
 	ff *fsFile
 	r  io.Reader
 	lr io.LimitedReader
 }
 
-func (r *bigFileReader) UpdateByteRange(startPos, endPos int) error {
+func (r *fsBigFileReader) UpdateByteRange(startPos, endPos int) error {
 	if _, err := r.f.Seek(int64(startPos), 0); err != nil {
 		return err
 	}
@@ -255,11 +285,11 @@ func (r *bigFileReader) UpdateByteRange(startPos, endPos int) error {
 	return nil
 }
 
-func (r *bigFileReader) Read(p []byte) (int, error) {
+func (r *fsBigFileReader) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 
-func (r *bigFileReader) WriteTo(w io.Writer) (n int64, err error) {
+func (r *fsBigFileReader) WriteTo(w io.Writer) (n int64, err error) {
 	if rf, ok := w.(io.ReaderFrom); ok {
 		// 快路径。Sendfile 一定被触发。
 		return rf.ReadFrom(r.r)
@@ -269,7 +299,7 @@ func (r *bigFileReader) WriteTo(w io.Writer) (n int64, err error) {
 	return utils.CopyZeroAlloc(zw, r.r)
 }
 
-func (r *bigFileReader) Close() error {
+func (r *fsBigFileReader) Close() error {
 	r.r = r.f
 	n, err := r.f.Seek(0, 0)
 	if err == nil {
@@ -330,11 +360,48 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		n, err = w.Write(ff.dirIndex[r.startPos:r.endPos])
 		return int64(n), err
 	}
+
+	if rf, ok := w.(io.ReaderFrom); ok {
+		return rf.ReadFrom(r)
+	}
+
+	curPos := r.startPos
+	bufV := utils.CopyBufPool.Get()
+	buf := bufV.([]byte)
+	for err == nil {
+		tailLen := r.endPos - curPos
+		if tailLen <= 0 {
+			break
+		}
+		if len(buf) > tailLen {
+			buf = buf[:tailLen]
+		}
+		n, err = ff.f.ReadAt(buf, int64(curPos))
+		nw, errW := w.Write(buf[:n])
+		curPos += nw
+		if errW == nil && nw != n {
+			panic("BUG: Write(p) 返回 (n, nil)，但 n != len(p)")
+		}
+		if err == nil {
+			err = errW
+		}
+	}
+	utils.CopyBufPool.Put(bufV)
+
+	if err == io.EOF {
+		err = nil
+	}
+	return int64(curPos - r.startPos), err
 }
 
 func (r *fsSmallFileReader) Close() error {
-	//TODO implement me
-	panic("implement me")
+	ff := r.ff
+	ff.decReadersCount()
+	r.ff = nil
+	r.startPos = 0
+	r.endPos = 0
+	ff.h.smallFileReaderPool.Put(r)
+	return nil
 }
 
 var (

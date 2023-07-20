@@ -16,6 +16,7 @@ var (
 
 type ErrorType uint64
 
+// Error 表示一个带有错误类型和元信息的错误规范。
 type Error struct {
 	Err  error
 	Type ErrorType
@@ -109,6 +110,7 @@ func NewPrivatef(format string, v ...any) *Error {
 	return New(fmt.Errorf(format, v...), ErrorTypePrivate, nil)
 }
 
+// ErrorChain 错误链。
 type ErrorChain []*Error
 
 func (c ErrorChain) String() string {
@@ -154,7 +156,7 @@ func (c ErrorChain) ByType(t ErrorType) ErrorChain {
 	return result
 }
 
-// Last 返回错误切片中最后一个错误。
+// Last 返回错误链中最后一个错误。
 func (c ErrorChain) Last() *Error {
 	if length := len(c); length > 0 {
 		return c[length-1]

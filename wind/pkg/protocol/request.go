@@ -761,7 +761,7 @@ func (req *Request) SwapBody(body []byte) []byte {
 	return oldBody
 }
 
-// URI 返回请求的 URI
+// URI 返回请求的完整网址。
 func (req *Request) URI() *URI {
 	req.ParseURI()
 	return &req.uri
