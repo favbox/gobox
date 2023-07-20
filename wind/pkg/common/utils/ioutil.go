@@ -3,7 +3,7 @@ package utils
 import (
 	"io"
 
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 // CopyZeroAlloc 零分配拷贝。

@@ -3,7 +3,7 @@ package syncx
 import (
 	"sync"
 
-	"github.com/favbox/gobox/air/panics"
+	"github.com/favbox/gosky/air/panics"
 )
 
 // NewWaitGroup 创建新的协程等待组。

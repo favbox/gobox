@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/favbox/gobox/wind/internal/bytesconv"
-	"github.com/favbox/gobox/wind/internal/bytestr"
-	"github.com/favbox/gobox/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/internal/bytesconv"
+	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/internal/nocopy"
 )
 
 // AcquireURI 从池中返回一个空白 URI 实例。

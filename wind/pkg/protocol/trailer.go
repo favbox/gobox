@@ -3,10 +3,10 @@ package protocol
 import (
 	"bytes"
 
-	"github.com/favbox/gobox/wind/internal/bytestr"
-	errs "github.com/favbox/gobox/wind/pkg/common/errors"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/internal/bytestr"
+	errs "github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
 // Trailer 是 HTTP 响应标头的挂车，规定了哪个标头用来挂载分块消息的元信息。

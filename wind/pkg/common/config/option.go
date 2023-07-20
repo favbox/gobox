@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 const (

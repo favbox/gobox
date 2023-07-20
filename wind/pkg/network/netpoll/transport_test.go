@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/favbox/gobox/wind/pkg/common/config"
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/common/config"
+	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sys/unix"
 )

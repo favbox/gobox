@@ -7,10 +7,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/stackless"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/stackless"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 // CompressDefaultCompression 默认压缩率

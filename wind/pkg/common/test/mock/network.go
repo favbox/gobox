@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/netpoll"
-	errs "github.com/favbox/gobox/wind/pkg/common/errors"
-	"github.com/favbox/gobox/wind/pkg/network"
+	errs "github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 type Recorder interface {

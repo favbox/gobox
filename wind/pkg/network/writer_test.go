@@ -3,7 +3,7 @@ package network
 import (
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 )
 
 const size1K = 1024

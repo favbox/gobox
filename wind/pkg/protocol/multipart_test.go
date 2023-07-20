@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 )
 
 func TestWriteMultipartForm(t *testing.T) {

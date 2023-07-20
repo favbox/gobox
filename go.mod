@@ -1,4 +1,4 @@
-module github.com/favbox/gobox
+module github.com/favbox/gosky
 
 go 1.20
 

@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/favbox/gobox/air/gopkg/lang/mcache"
+	"github.com/favbox/gosky/air/gopkg/lang/mcache"
 )
 
 const size4K = 4 * 1024

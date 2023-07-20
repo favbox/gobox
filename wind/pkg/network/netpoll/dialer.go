@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/netpoll"
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 var errTLSNotSupported = errors.New("netpoll 尚不支持 tls")

@@ -1,7 +1,7 @@
 package stringx
 
 import (
-	"github.com/favbox/gobox/air/gopkg/lang/fastrand"
+	"github.com/favbox/gosky/air/gopkg/lang/fastrand"
 )
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

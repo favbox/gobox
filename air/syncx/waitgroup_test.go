@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 )
 
 func ExampleWaitGroup_Wait() {

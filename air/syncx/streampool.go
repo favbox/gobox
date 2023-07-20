@@ -3,7 +3,7 @@ package syncx
 import (
 	"sync"
 
-	"github.com/favbox/gobox/air/panics"
+	"github.com/favbox/gosky/air/panics"
 )
 
 // NewStreamPool 创建新的流式并发协程池。

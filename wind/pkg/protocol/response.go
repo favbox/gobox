@@ -5,12 +5,12 @@ import (
 	"net"
 	"sync"
 
-	"github.com/favbox/gobox/wind/internal/bytesconv"
-	"github.com/favbox/gobox/wind/internal/nocopy"
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/compress"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/internal/bytesconv"
+	"github.com/favbox/gosky/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/compress"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 var (

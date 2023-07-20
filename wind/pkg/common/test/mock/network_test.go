@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/netpoll"
-	errs "github.com/favbox/gobox/wind/pkg/common/errors"
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
+	errs "github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 )
 
 func TestConn(t *testing.T) {

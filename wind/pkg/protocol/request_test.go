@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/compress"
-	"github.com/favbox/gobox/wind/pkg/common/config"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/compress"
+	"github.com/favbox/gosky/wind/pkg/common/config"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 	"github.com/stretchr/testify/assert"
 )
 

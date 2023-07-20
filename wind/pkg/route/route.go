@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/favbox/gobox/wind/pkg/app"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
-	rConsts "github.com/favbox/gobox/wind/pkg/route/consts"
+	"github.com/favbox/gosky/wind/pkg/app"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
+	rConsts "github.com/favbox/gosky/wind/pkg/route/consts"
 )
 
 // Route 表示请求路由的规范，包括请求方法、路径及其处理程序。

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/favbox/gobox/air/gopkg/internal/hack"
-	"github.com/favbox/gobox/air/gopkg/lang/fastrand"
+	"github.com/favbox/gosky/air/gopkg/internal/hack"
+	"github.com/favbox/gosky/air/gopkg/lang/fastrand"
 )
 
 var ErrDecodeRune = errors.New("符文编码出错")

@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
 	"github.com/stretchr/testify/assert"
 )
 

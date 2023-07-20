@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/stretchr/testify/assert"
 )
 

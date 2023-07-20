@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 // network.Dialer 声明全局拨号器。

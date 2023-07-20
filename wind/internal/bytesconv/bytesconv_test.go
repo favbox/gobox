@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 )
 
 func TestAppendQuotedArg(t *testing.T) {
@@ -51,8 +51,8 @@ func TestLowercaseBytes(t *testing.T) {
 	for _, v := range []struct {
 		b1, b2 []byte
 	}{
-		{[]byte("GOBOX-HTTP"), []byte("gobox-http")},
-		{[]byte("GOBOX"), []byte("gobox")},
+		{[]byte("gosky-HTTP"), []byte("gosky-http")},
+		{[]byte("gosky"), []byte("gosky")},
 		{[]byte("HTTP"), []byte("http")},
 	} {
 		LowercaseBytes(v.b1)
@@ -67,8 +67,8 @@ func TestB2s(t *testing.T) {
 		s string
 		b []byte
 	}{
-		{"gobox-http", []byte("gobox-http")},
-		{"gobox", []byte("gobox")},
+		{"gosky-http", []byte("gosky-http")},
+		{"gosky", []byte("gosky")},
 		{"http", []byte("http")},
 	} {
 		assert.DeepEqual(t, v.s, B2s(v.b))
@@ -82,8 +82,8 @@ func TestS2b(t *testing.T) {
 		s string
 		b []byte
 	}{
-		{"gobox-http", []byte("gobox-http")},
-		{"gobox", []byte("gobox")},
+		{"gosky-http", []byte("gosky-http")},
+		{"gosky", []byte("gosky")},
 		{"http", []byte("http")},
 	} {
 		assert.DeepEqual(t, v.b, S2b(v.s))

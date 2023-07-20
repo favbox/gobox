@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/cloudwego/netpoll"
-	"github.com/favbox/gobox/wind/pkg/common/config"
-	"github.com/favbox/gobox/wind/pkg/common/hlog"
-	"github.com/favbox/gobox/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/common/config"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 func init() {

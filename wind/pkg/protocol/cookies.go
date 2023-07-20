@@ -5,12 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/favbox/gobox/wind/internal/bytesconv"
-	"github.com/favbox/gobox/wind/internal/bytestr"
-	"github.com/favbox/gobox/wind/internal/nocopy"
-	"github.com/favbox/gobox/wind/pkg/common/errors"
-	"github.com/favbox/gobox/wind/pkg/common/hlog"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/internal/bytesconv"
+	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
 )
 
 const (

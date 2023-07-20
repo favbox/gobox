@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/favbox/gobox/wind/internal/bytestr"
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
 func TestTrailerAdd(t *testing.T) {

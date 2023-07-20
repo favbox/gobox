@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/favbox/gobox/wind/internal/bytestr"
-	"github.com/favbox/gobox/wind/pkg/common/hlog"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 	"github.com/stretchr/testify/assert"
 )
 

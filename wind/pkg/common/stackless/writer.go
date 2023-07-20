@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/errors"
 )
 
 // Writer 是无堆栈编写器必须遵守的接口。

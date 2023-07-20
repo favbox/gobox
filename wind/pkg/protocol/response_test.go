@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/compress"
-	"github.com/favbox/gobox/wind/pkg/common/test/assert"
-	"github.com/favbox/gobox/wind/pkg/common/test/mock"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/compress"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/mock"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
 func TestResponseCopyTo(t *testing.T) {

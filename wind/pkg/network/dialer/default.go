@@ -2,7 +2,7 @@
 
 package dialer
 
-import "github.com/favbox/gobox/wind/pkg/network/netpoll"
+import "github.com/favbox/gosky/wind/pkg/network/netpoll"
 
 func init() {
 	// mac+linux 默认全局拨号器为 netpoll.dialer

@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/favbox/gobox/wind/pkg/common/bytebufferpool"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
-	"github.com/favbox/gobox/wind/pkg/network"
-	"github.com/favbox/gobox/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
 // MarshalMultipartForm 将表单编排为字节切片。

@@ -1,7 +1,7 @@
 // Package bytestr 定义一些常用字节化字符串。
 package bytestr
 
-import "github.com/favbox/gobox/wind/pkg/protocol/consts"
+import "github.com/favbox/gosky/wind/pkg/protocol/consts"
 
 var (
 	DefaultServerName  = []byte("wind")

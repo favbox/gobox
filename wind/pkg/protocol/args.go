@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/favbox/gobox/wind/internal/bytesconv"
-	"github.com/favbox/gobox/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/internal/bytesconv"
+	"github.com/favbox/gosky/wind/internal/nocopy"
 )
 
 const (

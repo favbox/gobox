@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/favbox/gobox/wind/pkg/common/config"
-	"github.com/favbox/gobox/wind/pkg/common/test/mock"
+	"github.com/favbox/gosky/wind/pkg/common/config"
+	"github.com/favbox/gosky/wind/pkg/common/test/mock"
 	"github.com/stretchr/testify/assert"
 )
 

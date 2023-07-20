@@ -3,7 +3,7 @@ package fastrand
 import (
 	"unsafe"
 
-	"github.com/favbox/gobox/air/internal/runtimex"
+	"github.com/favbox/gosky/air/internal/runtimex"
 )
 
 // Uint32 返回一个伪随机值作为 uint32。

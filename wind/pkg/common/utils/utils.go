@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"runtime"
 
-	"github.com/favbox/gobox/wind/internal/bytesconv"
+	"github.com/favbox/gosky/wind/internal/bytesconv"
 )
 
 // CaseInsensitiveCompare 不分大小写，比较两者是否相同。

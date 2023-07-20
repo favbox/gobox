@@ -3,11 +3,11 @@ package route
 import (
 	"sync/atomic"
 
-	"github.com/favbox/gobox/wind/internal/nocopy"
-	"github.com/favbox/gobox/wind/pkg/app"
-	"github.com/favbox/gobox/wind/pkg/common/config"
-	"github.com/favbox/gobox/wind/pkg/common/hlog"
-	"github.com/favbox/gobox/wind/pkg/common/utils"
+	"github.com/favbox/gosky/wind/internal/nocopy"
+	"github.com/favbox/gosky/wind/pkg/app"
+	"github.com/favbox/gosky/wind/pkg/common/config"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
 )
 
 type Engine struct {
