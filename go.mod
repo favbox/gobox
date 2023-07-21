@@ -6,6 +6,7 @@ require (
 	github.com/cloudwego/netpoll v0.3.2
 	github.com/stretchr/testify v1.8.4
 	github.com/zeromicro/go-zero v1.5.3
+	golang.org/x/net v0.10.0
 	golang.org/x/sys v0.8.0
 )
 

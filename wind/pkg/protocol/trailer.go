@@ -101,12 +101,12 @@ func (t *Trailer) Reset() {
 	t.ResetSkipNormalize()
 }
 
-// DisableNormalizing 禁用键名称的规格化。
+// DisableNormalizing 禁用键名称的规范化。
 func (t *Trailer) DisableNormalizing() {
 	t.disableNormalizing = true
 }
 
-// IsDisableNormalizing 判断当前是否禁用键名称的规格化。
+// IsDisableNormalizing 判断当前是否禁用键名称的规范化。
 func (t *Trailer) IsDisableNormalizing() bool {
 	return t.disableNormalizing
 }

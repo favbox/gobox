@@ -281,7 +281,7 @@ func (resp *Response) Reset() {
 	resp.hijackWriter = nil
 }
 
-// ResetBody 重置响应的主体。
+// ResetBody 只重置响应的主体。
 //
 //   - 若主体字节数 ≤ 保留值，仅重置不清空
 //   - 若主体字节数 ＞ 保留值，清空并返回池

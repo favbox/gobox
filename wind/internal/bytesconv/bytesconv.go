@@ -132,3 +132,8 @@ func ParseUint(buf []byte) (int, error) {
 	}
 	return v, err
 }
+
+// ParseHTTPDate 解析符合 HTTP (RFC1123) 的日期。
+func ParseHTTPDate(date []byte) (time.Time, error) {
+	return time.Parse(time.RFC1123, B2s(date))
+}

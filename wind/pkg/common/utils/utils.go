@@ -1,11 +1,15 @@
 package utils
 
 import (
+	"bytes"
 	"reflect"
 	"runtime"
 
 	"github.com/favbox/gosky/wind/internal/bytesconv"
+	errs "github.com/favbox/gosky/wind/pkg/common/errors"
 )
+
+var errNeedMore = errs.New(errs.ErrNeedMore, errs.ErrorTypePublic, "无法找到换行符")
 
 // CaseInsensitiveCompare 不分大小写，比较两者是否相同。
 // 比直接转小写后相比更快。
@@ -22,7 +26,7 @@ func CaseInsensitiveCompare(a, b []byte) bool {
 	return true
 }
 
-// NormalizeHeaderKey 规格化标头键名：将首字母及破折号后首字母转大写，其他转小写。
+// NormalizeHeaderKey 规范化标头键名：将首字母及破折号后首字母转大写，其他转小写。
 func NormalizeHeaderKey(b []byte, disableNormalizing bool) {
 	if disableNormalizing {
 		return
@@ -58,4 +62,17 @@ func Assert(guard bool, text string) {
 
 func NameOfFunction(f any) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+}
+
+// NextLine 返回字节切片中第一个行及剩余行。
+func NextLine(b []byte) ([]byte, []byte, error) {
+	nNext := bytes.IndexByte(b, '\n')
+	if nNext < 0 {
+		return nil, nil, errNeedMore
+	}
+	n := nNext
+	if n > 0 && b[n-1] == '\r' {
+		n--
+	}
+	return b[:n], b[nNext+1:], nil
 }

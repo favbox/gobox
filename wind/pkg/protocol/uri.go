@@ -201,7 +201,7 @@ func (u *URI) String() string {
 
 // Path 返回 URI 路径，例如 /foo/bar 是 http://aaa.com/foo/bar?baz=123#qwe 的路径。
 //
-// 返回路径都是经过url编码和规格化的，
+// 返回路径都是经过url编码和规范化的，
 // 例如 '//f%20obar/baz/../zzz' 变成 '/f obar/zzz'。
 //
 // 返回的值在下一次URI方法调用之前一直有效。
@@ -514,7 +514,7 @@ func normalizePath(dst, src []byte) []byte {
 		}
 	}
 
-	// 规格化所有双斜杠
+	// 规范化所有双斜杠
 	b := dst
 	bSize := len(b)
 	for {
@@ -530,7 +530,7 @@ func normalizePath(dst, src []byte) []byte {
 	}
 	dst = dst[:bSize]
 
-	// 规格化 /./ 部分
+	// 规范化 /./ 部分
 	b = dst
 	for {
 		n := bytes.Index(b, bytestr.StrSlashDotSlash)
@@ -542,7 +542,7 @@ func normalizePath(dst, src []byte) []byte {
 		b = b[:len(b)-nn+n]
 	}
 
-	// 规格化形如 /foo/../ 的部分
+	// 规范化形如 /foo/../ 的部分
 	for {
 		n := bytes.Index(b, bytestr.StrSlashDotDotSlash)
 		if n < 0 {
@@ -557,7 +557,7 @@ func normalizePath(dst, src []byte) []byte {
 		b = b[:len(b)-n+nn]
 	}
 
-	// 规格化结尾形如 /foo/.. 的部分
+	// 规范化结尾形如 /foo/.. 的部分
 	n := bytes.LastIndex(b, bytestr.StrSlashDotDot)
 	if n >= 0 && n+len(bytestr.StrSlashDotDot) == len(b) {
 		nn := bytes.LastIndexByte(b[:n], '/')

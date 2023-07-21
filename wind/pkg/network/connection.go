@@ -24,7 +24,7 @@ type Reader interface {
 	// 调用 Release 后，通过 Peek 等方法获取的切片将成为无效地址，无法再使用。
 	Release() error
 
-	// Len 返回读取器中可读数据的总长度。
+	// Len 返回可读数据的总长度。
 	Len() int
 
 	// ReadByte 通过读指针前进来读取下一个字节。

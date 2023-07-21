@@ -266,7 +266,7 @@ func (req *Request) ConstructBodyStream(body *bytebufferpool.ByteBuffer, bodyStr
 	req.bodyStream = bodyStream
 }
 
-// CopyTo 拷贝主体流之外的请求信息到 dst。
+// CopyTo 将当前请求拷贝到 dst（主体流除外）。
 func (req *Request) CopyTo(dst *Request) {
 	req.CopyToSkipBody(dst)
 	if req.bodyRaw != nil {

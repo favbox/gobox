@@ -12,6 +12,9 @@ var (
 	ErrTimeout          = errors.New("超时")
 	ErrWriteTimeout     = errors.New("写超时")
 	ErrNoMultipartForm  = errors.New("请求的 Content-Type 无 multipart/form-data")
+	ErrNothingRead      = errors.New("未读取任何内容")
+	ErrNeedMore         = errors.New("需要更多数据")
+	ErrBodyTooLarge     = errors.New("主体大小超过限制")
 )
 
 type ErrorType uint64
@@ -82,6 +85,7 @@ const (
 
 var _ error = (*Error)(nil)
 
+// New 新建一个指定错误和错误类型及元数据的自定义错误。
 func New(err error, t ErrorType, meta any) *Error {
 	return &Error{
 		Err:  err,

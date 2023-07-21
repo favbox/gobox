@@ -221,14 +221,14 @@ func (h *RequestHeader) DelAllCookies() {
 	h.cookies = h.cookies[:0]
 }
 
-// DelBytes 删除指定键 key 对应的标头。
+// DelBytes 删除指定 key 对应的标头。
 func (h *RequestHeader) DelBytes(key []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	utils.NormalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
 	h.del(h.bufKV.key)
 }
 
-// 删除指定键 key 对应的标头。
+// 删除指定 key 对应的标头。
 func (h *RequestHeader) del(key []byte) {
 	switch string(key) {
 	case consts.HeaderHost:
@@ -250,7 +250,7 @@ func (h *RequestHeader) del(key []byte) {
 	h.h = delAllArgsBytes(h.h, key)
 }
 
-// DelCookie 删除指定键 key 对应的 cookie。
+// DelCookie 删除指定 key 对应的 cookie。
 func (h *RequestHeader) DelCookie(key string) {
 	h.collectCookies()
 	h.cookies = delAllArgs(h.cookies, key)
@@ -540,7 +540,7 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 	return h.mulHeader
 }
 
-// PeekArgBytes 返回指定 key （不考虑规格化）对应的标头值字节切片。
+// PeekArgBytes 返回指定 key （不考虑规范化）对应的标头值字节切片。
 func (h *RequestHeader) PeekArgBytes(key []byte) []byte {
 	return peekArgBytes(h.h, key)
 }
@@ -1322,7 +1322,7 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	}
 }
 
-// PeekAll 返回指定 key 按需规格化后的所有标头值切片。
+// PeekAll 返回指定 key 按需规范化后的所有标头值切片。
 //
 // 返回值在 ReleaseResponse 之前一直有效，且可修改。
 //
@@ -1435,7 +1435,7 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 	h.SetCanonical(k, value)
 }
 
-// SetCanonical 设置指定的 'key: value' 标头，假定该键为规范形式。
+// SetCanonical 设置键名已规范化的 'key: value' 标头。
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1714,7 +1714,7 @@ func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	return releaseArg(cookies)
 }
 
-// 将 key 加入 kv 后按需规格化并返回。
+// 将 key 加入 kv 后按需规范化并返回。
 func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
 	kv.key = append(kv.key[:0], key...)
 	utils.NormalizeHeaderKey(kv.key, disableNormalizing)

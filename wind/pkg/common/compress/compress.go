@@ -97,6 +97,9 @@ func WriteGunzip(w io.Writer, p []byte) (int, error) {
 	return nn, err
 }
 
+// AcquireStacklessGzipWriter 获取 io.Writer 的无堆栈压缩编写器。
+//
+// 用完记得调用 ReleaseStacklessGzipWriter 释放，以降低 GC，提高性能。
 func AcquireStacklessGzipWriter(w io.Writer, level int) stackless.Writer {
 	nLevel := normalizeCompressLevel(level)
 	p := stacklessGzipWriterPoolMap[nLevel]
@@ -111,6 +114,7 @@ func AcquireStacklessGzipWriter(w io.Writer, level int) stackless.Writer {
 	return sw
 }
 
+// ReleaseStacklessGzipWriter 释放无堆栈压缩编写器到指定级别池。
 func ReleaseStacklessGzipWriter(sw stackless.Writer, level int) {
 	_ = sw.Close()
 	nLevel := normalizeCompressLevel(level)
@@ -118,7 +122,7 @@ func ReleaseStacklessGzipWriter(sw stackless.Writer, level int) {
 	p.Put(sw)
 }
 
-// AcquireGzipReader 优先从池中获取一个 gzip 阅读器，如果没有则新建一个。
+// AcquireGzipReader 获取压缩文件的 gzip 阅读器，如果没有则新建一个。
 //
 // 记得用完调用 ReleaseGzipReader 释放并放回池中以减少内存开销。
 func AcquireGzipReader(r io.Reader) (*gzip.Reader, error) {

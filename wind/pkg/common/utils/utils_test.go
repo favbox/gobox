@@ -60,3 +60,27 @@ func BenchmarkAppendAssign(b *testing.B) {
 		a = append(a[:0], "hey"...)
 	}
 }
+
+func TestNextLine(t *testing.T) {
+	multiHeaderStr := []byte("Content-Type: application/x-www-form-urlencoded\r\nDate: Fri, 6 Aug 2021 11:00:31 GMT")
+	contentTypeStr, dateStr, hErr := NextLine(multiHeaderStr)
+	assert.Nil(t, hErr)
+	assert.EqualValues(t, "Content-Type: application/x-www-form-urlencoded", contentTypeStr)
+	assert.EqualValues(t, "Date: Fri, 6 Aug 2021 11:00:31 GMT", dateStr)
+
+	multiHeaderStr = []byte("Content-Type: application/x-www-form-urlencoded\nDate: Fri, 6 Aug 2021 11:00:31 GMT")
+	contentTypeStr, dateStr, hErr = NextLine(multiHeaderStr)
+	assert.Nil(t, hErr)
+	assert.EqualValues(t, "Content-Type: application/x-www-form-urlencoded", contentTypeStr)
+	assert.EqualValues(t, "Date: Fri, 6 Aug 2021 11:00:31 GMT", dateStr)
+
+	multiHeaderStr = []byte("\nContent-Type: application/x-www-form-urlencoded")
+	firstStr, secondStr, sErr := NextLine(multiHeaderStr)
+	assert.Nil(t, sErr)
+	assert.EqualValues(t, "", firstStr)
+	assert.EqualValues(t, "Content-Type: application/x-www-form-urlencoded", secondStr)
+
+	singleHeaderStr := []byte("Content-Type: application/x-www-form-urlencoded")
+	_, _, sErr = NextLine(singleHeaderStr)
+	assert.EqualValues(t, errNeedMore, sErr)
+}
