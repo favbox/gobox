@@ -57,7 +57,10 @@ type Options struct {
 	// 不逃逸路径值。
 	UnescapePathValues bool
 
-	MaxRequestBodySize           int
+	// 请求主体的最大字节数
+	MaxRequestBodySize int
+
+	// 主体最大的保留字节数
 	MaxKeepBodySize              int
 	GetOnly                      bool
 	DisableKeepalive             bool
@@ -77,7 +80,7 @@ type Options struct {
 	TraceLevel                   any
 	ListenConfig                 *net.ListenConfig
 
-	// 是创建传输器的函数。
+	// 是创建网络传输器的函数。
 	TransporterNewer    func(opt *Options) network.Transporter
 	AltTransporterNewer func(opt *Options) network.Transporter
 

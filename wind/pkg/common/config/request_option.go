@@ -5,7 +5,7 @@ import "time"
 // 请求项预定义的一组配置方法。
 var preDefinedOpts []RequestOption
 
-// RequestOption 是请求配置项唯一的配置方法结构体。
+// RequestOption 是请求项的唯一配置方法结构体。
 type RequestOption struct {
 	F func(o *RequestOptions)
 }

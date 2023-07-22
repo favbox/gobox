@@ -2,39 +2,22 @@ package app
 
 import (
 	"io"
+	"mime/multipart"
 	"time"
 
 	"github.com/favbox/gosky/wind/internal/bytesconv"
 	"github.com/favbox/gosky/wind/internal/bytestr"
 	"github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/tracer/traceinfo"
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/protocol"
 	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 	rConsts "github.com/favbox/gosky/wind/pkg/route/consts"
+	"github.com/favbox/gosky/wind/pkg/route/param"
 )
 
 type Handler interface {
 	ServeHTTP()
-}
-
-type (
-	ClientIP        func(ctx *RequestContext) string
-	ClientIPOptions struct {
-		RemoteIPHeaders []string
-		TrustedProxies  map[string]bool
-	}
-)
-
-var defaultClientIPOptions = ClientIPOptions{
-	RemoteIPHeaders: []string{"X-Real-IP", "X-Forward-For"},
-	TrustedProxies:  map[string]bool{"0.0.0.0": true},
-}
-
-// ClientIPWithOption 用于生成 ClientIP 函数，并有 engine.SetClientIPFunc 设置。
-func ClientIPWithOption(opts ClientIPOptions) ClientIP {
-	return func(ctx *RequestContext) string {
-		return ""
-	}
 }
 
 // RequestContext 表示一个请求的上下文信息。
@@ -46,9 +29,22 @@ type RequestContext struct {
 	// 是附加到所有使用该上下文的处理器/中间件的错误列表。
 	Errors errors.ErrorChain
 
+	Params   param.Params
 	handlers HandlerChain
 	fullPath string
 	index    int8 // 该请求处理链的当前索引
+
+	// 跟踪信息
+	traceInfo traceinfo.TraceInfo
+
+	// 是否启用跟踪
+	enableTrace bool
+
+	// 通过自定义函数获取客户端 IP
+	clientIPFunc ClientIP
+
+	// 通过自定义函数获取表单值
+	formValueFunc FormValueFunc
 }
 
 // Abort 中止处理，并防止调用挂起的处理器。
@@ -154,4 +150,135 @@ func (ctx *RequestContext) Host() []byte {
 func (ctx *RequestContext) WriteString(s string) (int, error) {
 	ctx.Response.AppendBodyString(s)
 	return len(s), nil
+}
+
+func (ctx *RequestContext) GetTraceInfo() traceinfo.TraceInfo {
+	return ctx.traceInfo
+}
+
+func (ctx *RequestContext) SetTraceInfo(t traceinfo.TraceInfo) {
+	ctx.traceInfo = t
+}
+
+func (ctx *RequestContext) IsEnableTrace() bool {
+	return ctx.enableTrace
+}
+
+// SetEnableTrace 设置是否启用跟踪。
+//
+// 注意：业务处理程序不可修改此值，否则可能引起恐慌。
+func (ctx *RequestContext) SetEnableTrace(enable bool) {
+	ctx.enableTrace = enable
+}
+
+func (ctx *RequestContext) SetClientIPFunc(fn ClientIP) {
+	ctx.clientIPFunc = fn
+}
+
+func (ctx *RequestContext) SetFormValueFunc(f FormValueFunc) {
+	ctx.formValueFunc = f
+}
+
+// QueryArgs 返回请求 URL 中的查询参数。
+//
+// 不会返回 POST 请求的参数 - 请使用 PostArgs()。
+// 其他参数请看 PostArgs, FormValue and FormFile。
+func (ctx *RequestContext) QueryArgs() *protocol.Args {
+	return ctx.URI().QueryArgs()
+}
+
+// PostArgs 返回 POST 参数。
+func (ctx *RequestContext) PostArgs() *protocol.Args {
+	return ctx.Request.PostArgs()
+}
+
+// FormFile 返回表单中指定 name 的第一个文件头。
+func (ctx *RequestContext) FormFile(name string) (*multipart.FileHeader, error) {
+	return ctx.Request.FormFile(name)
+}
+
+// FormValue 获取指定 key 的表单值。
+//
+// 查找位置：
+//
+//   - Query 查询字符串
+//   - POST 或 PUT 正文
+//
+// 还有更多细粒度的方法可获取表单值：
+//
+//   - QueryArgs 用于获取查询字符串中的值。
+//   - PostArgs 用于获取 POST 或 PUT 正文的值。
+//   - MultipartForm 用于获取多部分表单的值。
+//   - FormFile 用于获取上传的文件。
+//
+// 通过 engine.SetCustomFormValueFunc 可改变 FormValue 的取值行为。
+func (ctx *RequestContext) FormValue(key string) []byte {
+	if ctx.formValueFunc != nil {
+		return ctx.formValueFunc(ctx, key)
+	}
+	return defaultFormValue(ctx, key)
+}
+
+// MultipartForm 返回请求的多部分表单。
+//
+// 若请求的内容类型不是 'multipart/form-data' 则返回 errors.ErrNoMultipartForm。
+//
+// 所有上传的临时文件都将被自动删除。如果你想保留上传的文件，可移动或复制到新位置。
+//
+// 使用 SaveMultipartFile 可持久化保存上传的文件。
+//
+// 另见 FormFile and FormValue.
+func (ctx *RequestContext) MultipartForm() (*multipart.Form, error) {
+	return ctx.Request.MultipartForm()
+}
+
+type (
+	// ClientIP 自定义获取客户端 IP 的函数
+	ClientIP        func(ctx *RequestContext) string
+	ClientIPOptions struct {
+		RemoteIPHeaders []string
+		TrustedProxies  map[string]bool
+	}
+
+	// FormValueFunc 自定义获取表单值的函数
+	FormValueFunc func(*RequestContext, string) []byte
+)
+
+var defaultFormValue = func(ctx *RequestContext, key string) []byte {
+	v := ctx.QueryArgs().Peek(key)
+	if len(v) > 0 {
+		return v
+	}
+	v = ctx.PostArgs().Peek(key)
+	if len(v) > 0 {
+		return v
+	}
+	mf, err := ctx.MultipartForm()
+	if err == nil && mf.Value != nil {
+		vv := mf.Value[key]
+		if len(vv) > 0 {
+			return []byte(vv[0])
+		}
+	}
+	return nil
+}
+
+var defaultClientIPOptions = ClientIPOptions{
+	RemoteIPHeaders: []string{"X-Real-IP", "X-Forward-For"},
+	TrustedProxies:  map[string]bool{"0.0.0.0": true},
+}
+var defaultClientIP = ClientIPWithOption(defaultClientIPOptions)
+
+// ClientIPWithOption 用于生成 ClientIP 函数，并有 engine.SetClientIPFunc 设置。
+func ClientIPWithOption(opts ClientIPOptions) ClientIP {
+	return func(ctx *RequestContext) string {
+		return ""
+	}
+}
+
+// NewContext 创建一个指定最大路由参数的无请求/响应信息的纯粹 RequestContext。
+func NewContext(maxParams uint16) *RequestContext {
+	v := make(param.Params, 0, maxParams)
+	ctx := &RequestContext{Params: v, index: -1}
+	return ctx
 }
