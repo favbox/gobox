@@ -14,7 +14,8 @@ var (
 	ErrNoMultipartForm  = errors.New("请求的 Content-Type 无 multipart/form-data")
 	ErrNothingRead      = errors.New("未读取任何内容")
 	ErrNeedMore         = errors.New("需要更多数据")
-	ErrBodyTooLarge     = errors.New("主体大小超过限制")
+	ErrBodyTooLarge     = errors.New("正文大小超过限制")
+	ErrChunkedStream    = errors.New("分块的正文流")
 )
 
 type ErrorType uint64

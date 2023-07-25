@@ -3,14 +3,19 @@ package bytesconv
 import (
 	"net/http"
 	"reflect"
+	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 const (
-	upperHex = "0123456789ABCDEF"
-	lowerHex = "0123456789abcdef"
+	upperHex = "0123456789ABCDEF" // 大写的十六进制字符
+	lowerHex = "0123456789abcdef" // 小写的十六进制字符
 )
+
+var hexIntBufPool sync.Pool
 
 func LowercaseBytes(b []byte) {
 	for i, n := 0, len(b); i < n; i++ {
@@ -136,4 +141,67 @@ func ParseUint(buf []byte) (int, error) {
 // ParseHTTPDate 解析符合 HTTP (RFC1123) 的日期。
 func ParseHTTPDate(date []byte) (time.Time, error) {
 	return time.Parse(time.RFC1123, B2s(date))
+}
+
+// WriteHexInt 将十六进制正数 n 写入 w。
+func WriteHexInt(w network.Writer, n int) error {
+	if n < 0 {
+		panic("BUG: int 必须为正数")
+	}
+
+	v := hexIntBufPool.Get()
+	if v == nil {
+		v = make([]byte, maxHexIntChars+1)
+	}
+	buf := v.([]byte)
+
+	i := len(buf) - 1
+	for {
+		buf[i] = lowerHex[n&0xf]
+		n >>= 4
+		if n == 0 {
+			break
+		}
+		i--
+	}
+	safeBuf, err := w.Malloc(maxHexIntChars + 1 - i)
+	copy(safeBuf, buf[i:])
+	hexIntBufPool.Put(v)
+	return err
+}
+
+// ReadHexInt 从 r 中读取十六进制值。
+func ReadHexInt(r network.Reader) (int, error) {
+	n := 0
+	i := 0
+	var k int
+	for {
+		buf, err := r.Peek(1)
+		if err != nil {
+			r.Skip(1)
+
+			if i > 0 {
+				return n, nil
+			}
+			return -1, err
+		}
+
+		c := buf[0]
+		k = int(Hex2intTable[c])
+		if k == 16 {
+			if i == 0 {
+				r.Skip(1)
+				return -1, errEmptyHexNum
+			}
+			return n, nil
+		}
+		if i >= maxHexIntChars {
+			r.Skip(1)
+			return -1, errTooLargeHexNum
+		}
+
+		r.Skip(1)
+		n = (n << 4) | k
+		i++
+	}
 }

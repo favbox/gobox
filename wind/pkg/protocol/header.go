@@ -333,7 +333,7 @@ func (h *RequestHeader) Host() []byte {
 	return h.host
 }
 
-// IgnoreBody 返回请求方法是否为 GET 或 HEAD，若是则忽略 Body 部分。
+// IgnoreBody 方法为 GET 或 HEAD 请求则忽略正文，否则不忽略。
 func (h *RequestHeader) IgnoreBody() bool {
 	return h.IsGet() || h.IsHead()
 }

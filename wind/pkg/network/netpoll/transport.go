@@ -12,8 +12,10 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network"
 )
 
+var _ network.Transporter = (*transport)(nil)
+
 func init() {
-	// 禁用 netpoll 的日志
+	// 禁用 netpoll 的日志 TODO 测试，暂不关闭
 	//netpoll.SetLoggerOutput(io.Discard)
 }
 
@@ -29,23 +31,6 @@ type transport struct {
 	listenConfig     *net.ListenConfig
 	OnAccept         func(conn net.Conn) context.Context
 	OnConnect        func(ctx context.Context, conn network.Conn) context.Context
-}
-
-// NewTransporter 创建新的网络传输器实例。
-func NewTransporter(options *config.Options) network.Transporter {
-	return &transport{
-		RWMutex:          sync.RWMutex{},
-		network:          options.Network,
-		addr:             options.Addr,
-		keepAliveTimeout: options.KeepAliveTimeout,
-		readTimeout:      options.ReadTimeout,
-		writeTimeout:     options.WriteTimeout,
-		listener:         nil,
-		eventLoop:        nil,
-		listenConfig:     options.ListenConfig,
-		OnAccept:         options.OnAccept,
-		OnConnect:        options.OnConnect,
-	}
 }
 
 // ListenAndServe 绑定监听地址并持续服务，除非出现错误或传输器关闭。
@@ -114,8 +99,7 @@ func (t *transport) Close() error {
 	return t.Shutdown(ctx)
 }
 
-// Shutdown 停止监听器并优雅关闭。
-// 将等待所有连接关闭，直到触达截止时间。
+// Shutdown 停止监听器并优雅关闭。 将等待所有连接关闭，直到触达截止时间。
 func (t *transport) Shutdown(ctx context.Context) error {
 	defer func() {
 		_ = network.UnlinkUdsFile(t.network, t.addr)
@@ -126,4 +110,21 @@ func (t *transport) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return t.eventLoop.Shutdown(ctx)
+}
+
+// NewTransporter 创建新的网络传输器实例。
+func NewTransporter(options *config.Options) network.Transporter {
+	return &transport{
+		RWMutex:          sync.RWMutex{},
+		network:          options.Network,
+		addr:             options.Addr,
+		keepAliveTimeout: options.KeepAliveTimeout,
+		readTimeout:      options.ReadTimeout,
+		writeTimeout:     options.WriteTimeout,
+		listener:         nil,
+		eventLoop:        nil,
+		listenConfig:     options.ListenConfig,
+		OnAccept:         options.OnAccept,
+		OnConnect:        options.OnConnect,
+	}
 }

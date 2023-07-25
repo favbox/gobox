@@ -13,6 +13,7 @@ var (
 	errBodyTooLarge = errs.New(errs.ErrBodyTooLarge, errs.ErrorTypePublic, "ext")
 )
 
+// HeaderError 返回一个标头错误。
 func HeaderError(typ string, err, errParse error, b []byte) error {
 	if !errors.Is(errParse, errs.ErrNeedMore) {
 		return headerErrorMsg(typ, errParse, b)

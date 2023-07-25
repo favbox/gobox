@@ -117,6 +117,16 @@ func AddFile(w *multipart.Writer, fieldName, path string) error {
 	return WriteMultipartFormFile(w, fieldName, filepath.Base(path), file)
 }
 
+func AddMultipartFormField(w *multipart.Writer, mf *MultipartField) error {
+	partWriter, err := w.CreatePart(CreateMultipartHeader(mf.Param, mf.FileName, mf.ContentType))
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(partWriter, mf.Reader)
+	return err
+}
+
 func WriteMultipartFormFile(w *multipart.Writer, fieldName, fileName string, r io.Reader) error {
 	// 自动检测实际的多部分表单内容类型
 	cBuf := make([]byte, 512)

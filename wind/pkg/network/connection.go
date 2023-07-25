@@ -11,11 +11,20 @@ import (
 
 // Reader 适用于缓冲阅读器。
 type Reader interface {
+	// Len 返回可读数据的总长度。
+	Len() int
+
 	// Peek 返回接下来的 n 个字节，而不推进读取器。
 	Peek(n int) ([]byte, error)
 
 	// Skip 跳过接下来的 n 个字节。
 	Skip(n int) error
+
+	// ReadByte 通过读指针前进来读取下一个字节。
+	ReadByte() (byte, error)
+
+	// ReadBinary 通过读指针前进来读取下 n 个字节。
+	ReadBinary(n int) (p []byte, err error)
 
 	// Release 释放所有读取切片占用的内存。
 	//
@@ -23,15 +32,6 @@ type Reader interface {
 	//
 	// 调用 Release 后，通过 Peek 等方法获取的切片将成为无效地址，无法再使用。
 	Release() error
-
-	// Len 返回可读数据的总长度。
-	Len() int
-
-	// ReadByte 通过读指针前进来读取下一个字节。
-	ReadByte() (byte, error)
-
-	// ReadBinary 通过读指针前进来读取下 n 个字节。
-	ReadBinary(n int) (p []byte, err error)
 }
 
 // Writer 适用于缓冲写入器。
@@ -77,8 +77,8 @@ type HandleSpecificError interface {
 
 // ErrorNormalization 表示错误的规范化程序。
 type ErrorNormalization interface {
-	// TowindError 将 err 转为 wind 错误。
-	TowindError(err error) error
+	// ToWindError 将 err 转为 wind 错误。
+	ToWindError(err error) error
 }
 
 // DialFunc 定义拨打给定网址返回对应连接的拨号函数。

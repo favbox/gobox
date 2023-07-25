@@ -5,7 +5,10 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/favbox/gosky/wind/pkg/common/bytebufferpool"
 	"github.com/favbox/gosky/wind/pkg/common/test/assert"
+	"github.com/favbox/gosky/wind/pkg/common/test/mock"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 func TestAppendQuotedArg(t *testing.T) {
@@ -206,4 +209,28 @@ func BenchmarkAppendQuotedPath(b *testing.B) {
 			}
 		})
 	})
+}
+
+// 用于 32 位和 64 位的通用测试函数。
+func testWriteHexInt(t *testing.T, n int, expectedS string) {
+	w := bytebufferpool.Get()
+	zw := network.NewWriter(w)
+	if err := WriteHexInt(zw, n); err != nil {
+		t.Errorf("异常发生在写入十六进制值 %x: %v", n, err)
+	}
+	if err := zw.Flush(); err != nil {
+		t.Fatalf("异常发生于冲刷十六进制值 %x: %v", n, err)
+	}
+	s := B2s(w.B)
+	assert.DeepEqual(t, s, expectedS)
+}
+
+// 用于 32 位和 64 位的通用测试函数。
+func testReadHexInt(t *testing.T, s string, expectedN int) {
+	zr := mock.NewZeroCopyReader(s)
+	n, err := ReadHexInt(zr)
+	if err != nil {
+		t.Errorf("异常错误：%q. s=%s", err, s)
+	}
+	assert.DeepEqual(t, n, expectedN)
 }

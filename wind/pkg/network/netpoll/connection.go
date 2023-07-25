@@ -12,15 +12,24 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network"
 )
 
+// Conn 实现基于 netpoll 的网络连接。
 type Conn struct {
 	network.Conn
 }
 
-func (c *Conn) TowindError(err error) error {
+// --- 实现 network.ErrorNormalization ---
+
+func (c *Conn) ToWindError(err error) error {
 	if errors.Is(err, netpoll.ErrConnClosed) || errors.Is(err, syscall.EPIPE) {
 		return errs.ErrConnectionClosed
 	}
 	return err
+}
+
+// --- 实现 network.Reader ---
+
+func (c *Conn) Len() int {
+	return c.Conn.Len()
 }
 
 func (c *Conn) Peek(n int) (b []byte, err error) {
@@ -29,22 +38,14 @@ func (c *Conn) Peek(n int) (b []byte, err error) {
 	return
 }
 
-func (c *Conn) Read(p []byte) (int, error) {
-	n, err := c.Conn.Read(p)
-	err = normalizeErr(err)
-	return n, err
-}
-
 func (c *Conn) Skip(n int) error {
 	return c.Conn.Skip(n)
 }
 
-func (c *Conn) Release() error {
-	return c.Conn.Release()
-}
-
-func (c *Conn) Len() int {
-	return c.Conn.Len()
+func (c *Conn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	err = normalizeErr(err)
+	return n, err
 }
 
 func (c *Conn) ReadByte() (b byte, err error) {
@@ -59,6 +60,12 @@ func (c *Conn) ReadBinary(n int) (b []byte, err error) {
 	return
 }
 
+func (c *Conn) Release() error {
+	return c.Conn.Release()
+}
+
+// --- 实现 network.Writer ---
+
 func (c *Conn) Malloc(n int) (buf []byte, err error) {
 	return c.Conn.Malloc(n)
 }
@@ -70,6 +77,8 @@ func (c *Conn) WriteBinary(b []byte) (n int, err error) {
 func (c *Conn) Flush() error {
 	return c.Conn.Flush()
 }
+
+// --- 实现 network.HandleSpecificError ---
 
 // HandleSpecificError 判断特定错误是否需要忽略。
 func (c *Conn) HandleSpecificError(err error, remoteIP string) (needIgnore bool) {

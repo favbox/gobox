@@ -17,13 +17,14 @@ import (
 
 var errEOFReadHeader = errs.NewPublic("读取请求标头错误：EOF")
 
-// WriteHeader 将请求标头写入 w。
+// WriteHeader 将请求标头 h 写入 w。
 func WriteHeader(h *protocol.RequestHeader, w network.Writer) error {
 	header := h.Header()
 	_, err := w.WriteBinary(header)
 	return err
 }
 
+// ReadHeader 从网络阅读器 r 中读取请求标头至 h。
 func ReadHeader(h *protocol.RequestHeader, r network.Reader) error {
 	n := 1
 	for {
@@ -91,6 +92,7 @@ func parse(h *protocol.RequestHeader, buf []byte) (int, error) {
 	return m + n, nil
 }
 
+// 解析请求头的首行信息 - 请求方法、网址、协议
 func parseFirstLine(h *protocol.RequestHeader, buf []byte) (int, error) {
 	bNext := buf
 	var b []byte

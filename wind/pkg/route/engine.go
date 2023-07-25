@@ -15,6 +15,12 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network"
 )
 
+const unknownTransporterName = "unknown"
+
+var (
+	defaultTransporter = standard.NewTransporter
+)
+
 type Engine struct {
 	noCopy nocopy.NoCopy
 

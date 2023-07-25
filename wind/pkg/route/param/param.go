@@ -1,6 +1,8 @@
 package param
 
-// Param 网址中的键值对参数。
+// Param 路由参数。
+//
+// 支持命名路由参数 ":" 和 通配路由参数 "*"
 type Param struct {
 	Key   string
 	Value string

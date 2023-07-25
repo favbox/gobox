@@ -9,13 +9,14 @@ import (
 
 var errInvalidName = errs.NewPublic("无效的标头名称")
 
+// HeaderScanner 标头扫描器，用于进行 Next 迭代。
 type HeaderScanner struct {
 	B     []byte
 	Key   []byte
 	Value []byte
 	Err   error
 
-	// 存储标头子切片长度
+	// 标头子切片的长度
 	HLen int
 
 	DisableNormalizing bool
@@ -52,16 +53,15 @@ func (s *HeaderScanner) Next() bool {
 	} else {
 		n = bytes.IndexByte(s.B, ':')
 
-		// There can't be a \n inside the header name, check for this.
+		// 标头名称中不能有换行符 \n，此处进行检查。
 		x := bytes.IndexByte(s.B, '\n')
 		if x < 0 {
-			// A header name should always at some point be followed by a \n
-			// even if it's the one that terminates the header block.
+			// 标头名称应始终在其后跟一个 \n，即使它是终止标头块的名称。
 			s.Err = errNeedMore
 			return false
 		}
 		if x < n {
-			// There was a \n before the :
+			// : 前有换行符 \n
 			s.Err = errInvalidName
 			return false
 		}
