@@ -1,25 +1,43 @@
 package route
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
 	"github.com/favbox/gosky/wind/internal/nocopy"
 	"github.com/favbox/gosky/wind/pkg/app"
 	"github.com/favbox/gosky/wind/pkg/common/config"
+	errs "github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/common/hlog"
 	"github.com/favbox/gosky/wind/pkg/common/tracer"
 	"github.com/favbox/gosky/wind/pkg/common/tracer/stats"
 	"github.com/favbox/gosky/wind/pkg/common/tracer/traceinfo"
 	"github.com/favbox/gosky/wind/pkg/common/utils"
 	"github.com/favbox/gosky/wind/pkg/network"
+	"github.com/favbox/gosky/wind/pkg/network/standard"
+	"github.com/favbox/gosky/wind/pkg/protocol"
 )
 
 const unknownTransporterName = "unknown"
 
 var (
 	defaultTransporter = standard.NewTransporter
+
+	errInitFailed       = errs.NewPrivate("路由引擎已被初始化")
+	errAlreadyRunning   = errs.NewPrivate("路由引擎已在运行中")
+	errStatusNotRunning = errs.NewPrivate("路由引擎未在运行中")
+
+	default404Body = []byte("404 页面未找到")
+	default405Body = []byte("405 方法不允许")
+	default400Body = []byte("400 错误请求")
 )
+
+// CtxCallback 引擎启动时，依次触发的钩子函数
+type CtxCallback func(ctx context.Context)
+
+// CtxErrCallback 引擎关闭时，同时触发的钩子函数
+type CtxErrCallback func(ctx context.Context) error
 
 type Engine struct {
 	noCopy nocopy.NoCopy
@@ -33,19 +51,49 @@ type Engine struct {
 
 	// 路由
 	RouterGroup
+	trees MethodTrees
 
 	// 最大路由参数个数
 	maxParams uint16
 
-	// 底层网络传输器
+	allNoMethod app.HandlersChain
+	allNoRoute  app.HandlersChain
+	noRoute     app.HandlersChain
+	noMethod    app.HandlersChain
+
+	// TODO 用于渲染 HTML
+
+	// 底层传输的网络库，现有 go net 和 netpoll l两个选择
 	transport network.Transporter
 
-	// 跟踪控制器
+	// 用于链路追踪
 	tracerCtl   tracer.Controller
 	enableTrace bool
 
-	// 请求上下文池
+	// TODO 用于管理协议层
+
+	// RequestContext 连接池
 	ctxPool sync.Pool
+
+	// 处理从 http 处理器中恢复的 panic 的函数。
+	// 用于生成错误页并返回 http 错误代码 500（内部服务器错误）。
+	// 该处理器可防止服务器因未回复的 panic 而崩溃。
+	PanicHandler app.HandlerFunc
+
+	// 在收到 Expect 100 Continue 标头后调用 ContinueHandler。
+	// 使用该处理器，服务器可以基于头信息决定是否读取可能较大的请求正文。
+	//
+	// 默认会自动读取请求体，就像普通请求一样。
+	ContinueHandler func(header *protocol.RequestHeader) bool
+
+	// 用于表示引擎状态（Init/Running/Shutdown/CLosed）
+	status uint32
+
+	// 引擎启动时，依次触发的钩子函数
+	OnRun []CtxErrCallback
+
+	// 引擎关闭时，同时触发的钩子函数
+	OnShutdown []CtxCallback
 
 	// 自定义函数
 	clientIPFunc  app.ClientIP
@@ -61,7 +109,7 @@ func (engine *Engine) SetClientIPFunc(f app.ClientIP) {
 	engine.clientIPFunc = f
 }
 
-func (engine *Engine) addRoute(method, path string, handlers app.HandlerChain) {
+func (engine *Engine) addRoute(method, path string, handlers app.HandlersChain) {
 	if len(path) == 0 {
 		panic("路径不能为空")
 	}
@@ -85,7 +133,7 @@ func (engine *Engine) allocateContext() *app.RequestContext {
 	return ctx
 }
 
-func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlerChain) {
+func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlersChain) {
 	nHandlers := len(handlers)
 	handlerName := app.GetHandlerName(handlers.Last())
 	if handlerName == "" {
@@ -133,7 +181,7 @@ func NewEngine(opt *config.Options) *Engine {
 	}
 
 	// 初始化协议族
-	engine.protocolSuite = suite.New()
+	//engine.protocolSuite = suite.New()
 
 	return engine
 }

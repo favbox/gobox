@@ -8,13 +8,13 @@ import (
 // HandlerFunc 是请求的处理函数。
 type HandlerFunc func(c context.Context, ctx *RequestContext)
 
-// HandlerChain 处理链，定义了一组请求处理函数。
-type HandlerChain []HandlerFunc
+// HandlersChain 处理链，定义了一组请求处理函数。
+type HandlersChain []HandlerFunc
 
 // Last 返回处理链的最后一个处理函数。
 //
 // 通常来说，最后一个处理函数是主处理函数。
-func (c HandlerChain) Last() HandlerFunc {
+func (c HandlersChain) Last() HandlerFunc {
 	if length := len(c); length > 0 {
 		return c[length-1]
 	}

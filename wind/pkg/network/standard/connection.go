@@ -3,6 +3,7 @@ package standard
 import (
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"runtime"
 	"syscall"
@@ -76,6 +77,66 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 	return c.c.Write(b)
 }
 
+// ReadFrom 实现 io.ReaderFrom。若底层编写器支持 ReadFrom 方法，
+// 而且 c 尚无缓冲数据，则调用底层 ReadFrom 而不进行缓冲。
+func (c *Conn) ReadFrom(r io.Reader) (n int64, err error) {
+	if err = c.Flush(); err != nil {
+		return
+	}
+
+	if w, ok := c.c.(io.ReaderFrom); ok {
+		n, err = w.ReadFrom(r)
+		return
+	}
+
+	var m int
+	bufNode := c.outputBuffer.write
+
+	// if there is no available buffer, create one.
+	if !bufNode.recyclable() || cap(bufNode.buf) == 0 {
+		c.Malloc(block4k)
+		c.outputBuffer.write.Reset()
+		c.outputBuffer.len = cap(c.outputBuffer.write.buf)
+		bufNode = c.outputBuffer.write
+	}
+
+	for {
+		if bufNode.Cap() == 0 {
+			if err1 := c.Flush(); err1 != nil {
+				return n, err1
+			}
+		}
+
+		nr := 0
+		for nr < maxConsecutiveEmptyReads {
+			m, err = r.Read(bufNode.buf[bufNode.malloc:cap(bufNode.buf)])
+			if m != 0 || err != nil {
+				break
+			}
+			nr++
+		}
+		if nr == maxConsecutiveEmptyReads {
+			return n, io.ErrNoProgress
+		}
+		bufNode.malloc += m
+		n += int64(m)
+		if err != nil {
+			break
+		}
+	}
+	if err == io.EOF {
+		// If we filled the buffer exactly, flush preemptively.
+		if bufNode.Cap() == 0 {
+			err = c.Flush()
+		} else {
+			err = nil
+			// Update buffer available length for next Malloc
+			c.outputBuffer.len = bufNode.Cap()
+		}
+	}
+	return
+}
+
 // Close 关闭连接。
 func (c *Conn) Close() error {
 	return c.c.Close()
@@ -88,7 +149,7 @@ func (c *Conn) CloseNoResetBuffer() error {
 
 func (c *Conn) HandleSpecificError(err error, rip string) (needIgnore bool) {
 	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
-		hlog.SystemLogger().Debugf("Go net library error=%s, remoteAddr=%s", err.Error(), rip)
+		hlog.SystemLogger().Debugf("Go 网络库 错误=%s, 远程地址=%s", err.Error(), rip)
 		return true
 	}
 	return false
@@ -114,6 +175,7 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return c.c.SetWriteDeadline(t)
 }
 
+// Len 输入缓冲区的可读字节数
 func (c *Conn) Len() int {
 	return c.inputBuffer.len
 }
@@ -318,7 +380,7 @@ func (c *Conn) Flush() error {
 	}
 
 	for {
-		n, err := c.Write(c.outputBuffer.head.buf[c.outputBuffer.head.off:c.outputBuffer.head.malloc])
+		n, err := c.c.Write(c.outputBuffer.head.buf[c.outputBuffer.head.off:c.outputBuffer.head.malloc])
 		if err != nil {
 			return err
 		}

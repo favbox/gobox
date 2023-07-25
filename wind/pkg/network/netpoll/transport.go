@@ -34,7 +34,7 @@ type transport struct {
 }
 
 // ListenAndServe 绑定监听地址并持续服务，除非出现错误或传输器关闭。
-func (t *transport) ListenAndServe(onRequest network.OnData) (err error) {
+func (t *transport) ListenAndServe(onReq network.OnData) (err error) {
 	_ = network.UnlinkUdsFile(t.network, t.addr)
 	if t.listenConfig != nil {
 		t.listener, err = t.listenConfig.Listen(context.Background(), t.network, t.addr)
@@ -73,7 +73,7 @@ func (t *transport) ListenAndServe(onRequest network.OnData) (err error) {
 	// 创建 EventLoop
 	t.Lock()
 	t.eventLoop, err = netpoll.NewEventLoop(func(ctx context.Context, connection netpoll.Connection) error {
-		return onRequest(ctx, newConn(connection))
+		return onReq(ctx, newConn(connection))
 	}, opts...)
 	t.Unlock()
 	if err != nil {
@@ -81,7 +81,7 @@ func (t *transport) ListenAndServe(onRequest network.OnData) (err error) {
 	}
 
 	// 启动服务器
-	hlog.SystemLogger().Infof("HTTP 服务器监听地址 %s", t.listener.Addr().String())
+	hlog.SystemLogger().Infof("HTTP 服务器监听于 %s", t.listener.Addr().String())
 	t.RLock()
 	err = t.eventLoop.Serve(t.listener)
 	t.RUnlock()

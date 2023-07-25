@@ -47,7 +47,7 @@ type Routers interface {
 
 // RouterGroup 表示路由分组的配置，由前缀路径和一组处理器（中间件）组成。
 type RouterGroup struct {
-	Handlers app.HandlerChain
+	Handlers app.HandlersChain
 	basePath string
 	engine   *Engine
 	root     bool
@@ -168,7 +168,7 @@ func (group *RouterGroup) returnObj() Routers {
 	return group
 }
 
-func (group *RouterGroup) handle(httpMethod, relativePath string, handlers app.HandlerChain) Router {
+func (group *RouterGroup) handle(httpMethod, relativePath string, handlers app.HandlersChain) Router {
 	absolutePath := group.calculateAbsolutePath(relativePath)
 	handlers = group.combineHandlers(handlers)
 	group.engine.addRoute(httpMethod, absolutePath, handlers)
@@ -179,12 +179,12 @@ func (group *RouterGroup) calculateAbsolutePath(relativePath string) string {
 	return joinPaths(group.basePath, relativePath)
 }
 
-func (group *RouterGroup) combineHandlers(handlers app.HandlerChain) app.HandlerChain {
+func (group *RouterGroup) combineHandlers(handlers app.HandlersChain) app.HandlersChain {
 	finalSize := len(group.Handlers) + len(handlers)
 	if finalSize >= int(rConsts.AbortIndex) {
 		panic("处理函数过多")
 	}
-	mergedHandlers := make(app.HandlerChain, finalSize)
+	mergedHandlers := make(app.HandlersChain, finalSize)
 	copy(mergedHandlers, group.Handlers)
 	copy(mergedHandlers[len(group.Handlers):], handlers)
 	return mergedHandlers

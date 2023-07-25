@@ -30,7 +30,7 @@ type RequestContext struct {
 	Errors errors.ErrorChain
 
 	Params   param.Params
-	handlers HandlerChain
+	handlers HandlersChain
 	fullPath string
 	index    int8 // 该请求处理链的当前索引
 
