@@ -1,12 +1,16 @@
 package standard
 
 import (
+	"crypto/tls"
 	"errors"
 	"net"
+	"runtime"
 	"syscall"
 	"time"
 
 	errs "github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/network"
 )
 
 const (
@@ -37,6 +41,8 @@ func (c *Conn) ToWindError(err error) error {
 	}
 	return err
 }
+
+// --- 实现 network.Conn ---
 
 func (c *Conn) Read(b []byte) (n int, err error) {
 	n = c.Len()
@@ -73,6 +79,19 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 // Close 关闭连接。
 func (c *Conn) Close() error {
 	return c.c.Close()
+}
+
+// CloseNoResetBuffer 关闭连接但不重置缓冲区。
+func (c *Conn) CloseNoResetBuffer() error {
+	return c.c.Close()
+}
+
+func (c *Conn) HandleSpecificError(err error, rip string) (needIgnore bool) {
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		hlog.SystemLogger().Debugf("Go net library error=%s, remoteAddr=%s", err.Error(), rip)
+		return true
+	}
+	return false
 }
 
 func (c *Conn) LocalAddr() net.Addr {
@@ -133,18 +152,45 @@ func (c *Conn) Peek(n int) (p []byte, err error) {
 }
 
 func (c *Conn) Skip(n int) error {
-	//TODO implement me
-	panic("implement me")
+	// 检查是否有足够字节
+	if c.Len() < n {
+		return errs.NewPrivatef("链式缓冲区的现有长度不足以跳过 %d 个字节", n)
+	}
+	c.inputBuffer.len -= n // 重算长度
+
+	var l int
+	for ack := n; ack > 0; ack = ack - l {
+		l = c.inputBuffer.read.Len()
+		if l >= ack {
+			c.inputBuffer.read.off += ack
+			break
+		}
+		c.inputBuffer.read = c.inputBuffer.read.next
+	}
+	return nil
 }
 
 func (c *Conn) ReadByte() (byte, error) {
-	//TODO implement me
-	panic("implement me")
+	b, err := c.Peek(1)
+	if err != nil {
+		return ' ', err
+	}
+	err = c.Skip(1)
+	if err != nil {
+		return ' ', err
+	}
+	return b[0], nil
 }
 
-func (c *Conn) ReadBinary(n int) (p []byte, err error) {
-	//TODO implement me
-	panic("implement me")
+func (c *Conn) ReadBinary(n int) ([]byte, error) {
+	out := make([]byte, n)
+	b, err := c.Peek(n)
+	if err != nil {
+		return nil, err
+	}
+	copy(out, b)
+	err = c.Skip(n)
+	return out, err
 }
 
 // Release 释放链式缓冲区。
@@ -210,28 +256,101 @@ func (c *Conn) Release() error {
 }
 
 func (c *Conn) Malloc(n int) (buf []byte, err error) {
-	//TODO implement me
-	panic("implement me")
+	if n == 0 {
+		return
+	}
+
+	// 若当前缓冲区的容量大于我们所需，
+	// 就没有必要再去申请新节点了
+	if c.outputBuffer.len > n {
+		node := c.outputBuffer.write
+		m := node.malloc
+		node.malloc += n
+		node.buf = node.buf[:node.malloc]
+		c.outputBuffer.len -= n
+		return node.buf[m:node.malloc], nil
+	}
+
+	mallocSize := n
+	if n < defaultMallocSize {
+		mallocSize = defaultMallocSize
+	}
+	node := newBufferNode(mallocSize)
+	node.malloc = n
+	c.outputBuffer.len = cap(node.buf) - n
+	c.outputBuffer.write.next = node
+	c.outputBuffer.write = c.outputBuffer.write.next
+	return node.buf[:n], nil
 }
 
 func (c *Conn) WriteBinary(b []byte) (n int, err error) {
-	//TODO implement me
-	panic("implement me")
+	// 若数据少于 4k，只需拷到 outputBuffer。
+	if len(b) < block4k {
+		buf, err := c.Malloc(len(b))
+		if err != nil {
+			return 0, err
+		}
+		return copy(buf, b), nil
+	}
+
+	// 用缓冲区 b 构建一个新节点
+	node := newBufferNode(0)
+	node.malloc = len(b)
+	node.readOnly = true
+	node.buf = b
+	c.outputBuffer.write.next = node
+	c.outputBuffer.write = c.outputBuffer.write.next
+	c.outputBuffer.len = 0
+	return len(b), nil
 }
 
 func (c *Conn) Flush() error {
-	//TODO implement me
-	panic("implement me")
+	// 没待刷数据
+	if c.outputBuffer.head == c.outputBuffer.write && c.outputBuffer.head.Len() == 0 {
+		return nil
+	}
+
+	// 当前节点是最后一个请求的尾节点，就移到下一个节点。
+	if c.outputBuffer.head.Len() == 0 {
+		node := c.outputBuffer.head
+		c.outputBuffer.head = c.outputBuffer.head.next
+		node.Release()
+	}
+
+	for {
+		n, err := c.Write(c.outputBuffer.head.buf[c.outputBuffer.head.off:c.outputBuffer.head.malloc])
+		if err != nil {
+			return err
+		}
+		c.outputBuffer.head.off += n
+		if c.outputBuffer.head == c.outputBuffer.write {
+			// 若缓冲区容量小于 8k，就重置节点
+			if c.outputBuffer.head.recyclable() {
+				c.outputBuffer.head.Reset()
+				c.outputBuffer.len = cap(c.outputBuffer.head.buf)
+			}
+			break
+		}
+		// 冲刷下一个节点
+		node := c.outputBuffer.head
+		c.outputBuffer.head = c.outputBuffer.head.next
+		node.Release()
+	}
+	return nil
 }
 
 func (c *Conn) SetReadTimeout(t time.Duration) error {
-	//TODO implement me
-	panic("implement me")
+	if t <= 0 {
+		return c.c.SetReadDeadline(time.Time{})
+	}
+	return c.c.SetReadDeadline(time.Now().Add(t))
 }
 
 func (c *Conn) SetWriteTimeout(t time.Duration) error {
-	//TODO implement me
-	panic("implement me")
+	if t <= 0 {
+		return c.c.SetWriteDeadline(time.Time{})
+	}
+	return c.c.SetWriteDeadline(time.Now().Add(t))
 }
 
 // 读取大小为 n 的数据给 b，而不移动读指针。
@@ -340,9 +459,81 @@ func (c *Conn) releaseCaches() {
 	c.caches = c.caches[:0]
 }
 
+type TLSConn struct {
+	Conn
+}
+
+func (c *TLSConn) ConnectionState() tls.ConnectionState {
+	return c.c.(network.ConnTLSer).ConnectionState()
+}
+
+func (c *TLSConn) Handshake() error {
+	return c.c.(network.ConnTLSer).Handshake()
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+func newConn(c net.Conn, size int) network.Conn {
+	maxSize := defaultMallocSize
+	if size > maxSize {
+		maxSize = size
+	}
+
+	node := newBufferNode(maxSize)
+	inputBuffer := &linkBuffer{
+		head:  node,
+		read:  node,
+		write: node,
+	}
+	runtime.SetFinalizer(inputBuffer, (*linkBuffer).release)
+
+	outputNode := newBufferNode(0)
+	outputBuffer := &linkBuffer{
+		head:  outputNode,
+		write: outputNode,
+	}
+	runtime.SetFinalizer(outputBuffer, (*linkBuffer).release)
+
+	return &Conn{
+		c:            c,
+		inputBuffer:  inputBuffer,
+		outputBuffer: outputBuffer,
+		maxSize:      maxSize,
+	}
+}
+
+func newTLSConn(c net.Conn, size int) network.Conn {
+	maxSize := defaultMallocSize
+	if size > maxSize {
+		maxSize = size
+	}
+
+	node := newBufferNode(maxSize)
+	inputBuffer := &linkBuffer{
+		head:  node,
+		read:  node,
+		write: node,
+	}
+	runtime.SetFinalizer(inputBuffer, (*linkBuffer).release)
+
+	outputNode := newBufferNode(0)
+	outputBuffer := &linkBuffer{
+		head:  outputNode,
+		write: outputNode,
+	}
+	runtime.SetFinalizer(outputBuffer, (*linkBuffer).release)
+
+	return &TLSConn{
+		Conn{
+			c:            c,
+			inputBuffer:  inputBuffer,
+			outputBuffer: outputBuffer,
+			maxSize:      maxSize,
+		},
+	}
 }
