@@ -299,7 +299,7 @@ func TestTreeDuplicatePath(t *testing.T) {
 			t.Fatalf("panic inserting route '%s': %v", route, recv)
 		}
 
-		// Add again
+		// Addr again
 		recv = catchPanic(func() {
 			tree.addRoute(route, fakeHandler(route))
 		})

@@ -55,6 +55,20 @@ func NotNil(t testing.TB, data any) {
 	}
 }
 
+// NotEqual .
+func NotEqual(t testing.TB, expected, actual interface{}) {
+	t.Helper()
+	if expected == nil || actual == nil {
+		if expected == actual {
+			t.Fatalf("assertion failed, unexpected: %v, expected: %v", actual, expected)
+		}
+	}
+
+	if reflect.DeepEqual(actual, expected) {
+		t.Fatalf("assertion failed, unexpected: %v, expected: %v", actual, expected)
+	}
+}
+
 // True .
 func True(t testing.TB, obj any) {
 	DeepEqual(t, true, obj)

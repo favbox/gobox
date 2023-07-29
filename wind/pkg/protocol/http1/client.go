@@ -121,7 +121,7 @@ type ClientOptions struct {
 	ResponseBodyStream bool
 
 	// 与重试相关的所有配置
-	RetryConfig *retry.Options
+	RetryConfig *retry.Config
 
 	RetryIfFunc client.RetryIfFunc
 
@@ -219,7 +219,7 @@ func (c *HostClient) ConnPoolState() config.ConnPoolState {
 	cps := config.ConnPoolState{
 		PoolConnNum:  len(c.conns),
 		TotalConnNum: c.connsCount,
-		Add:          c.Addr,
+		Addr:         c.Addr,
 	}
 
 	if c.connsWait != nil {

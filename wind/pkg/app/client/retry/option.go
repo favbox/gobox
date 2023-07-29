@@ -4,12 +4,12 @@ import "time"
 
 // Option 用于设置重试选项的唯一结构体。
 type Option struct {
-	F func(o *Options)
+	F func(o *Config)
 }
 
-// Options 重试选项
-type Options struct {
-	// 调用尝试的最大次数，包括初始调用
+// Config 重试选项
+type Config struct {
+	// 最大重试次数，包括初始调用
 	MaxAttemptTimes uint
 
 	// 初始重试的延迟时间
@@ -26,7 +26,7 @@ type Options struct {
 	DelayPolicy DelayPolicyFunc
 }
 
-func (o *Options) Apply(opts []Option) {
+func (o *Config) Apply(opts []Option) {
 	for _, opt := range opts {
 		opt.F(o)
 	}
@@ -35,7 +35,7 @@ func (o *Options) Apply(opts []Option) {
 // WithMaxAttemptTimes 设置重试的最大尝试次数，包括初始调用。
 func WithMaxAttemptTimes(maxAttemptTimes uint) Option {
 	return Option{
-		F: func(o *Options) {
+		F: func(o *Config) {
 			o.MaxAttemptTimes = maxAttemptTimes
 		},
 	}
@@ -44,7 +44,7 @@ func WithMaxAttemptTimes(maxAttemptTimes uint) Option {
 // WithInitDelay 设置初始重试的延迟时间。
 func WithInitDelay(delay time.Duration) Option {
 	return Option{
-		F: func(o *Options) {
+		F: func(o *Config) {
 			o.Delay = delay
 		},
 	}
@@ -52,21 +52,21 @@ func WithInitDelay(delay time.Duration) Option {
 
 // WithMaxDelay 设置重试的最大延迟时间。
 func WithMaxDelay(maxDelay time.Duration) Option {
-	return Option{F: func(o *Options) {
+	return Option{F: func(o *Config) {
 		o.MaxDelay = maxDelay
 	}}
 }
 
 // WithMaxJitter 设置随机延迟的最大抖动时间。
 func WithMaxJitter(maxJitter time.Duration) Option {
-	return Option{F: func(o *Options) {
+	return Option{F: func(o *Config) {
 		o.MaxJitter = maxJitter
 	}}
 }
 
 // WithDelayPolicy 设置重试的延迟策略。
 func WithDelayPolicy(delayPolicy DelayPolicyFunc) Option {
-	return Option{F: func(o *Options) {
+	return Option{F: func(o *Config) {
 		o.DelayPolicy = delayPolicy
 	}}
 }

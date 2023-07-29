@@ -9,7 +9,7 @@ import (
 )
 
 func TestConfig_Apply(t *testing.T) {
-	var delayPolicyFunc DelayPolicyFunc = func(attempts uint, err error, retryConfig *Options) time.Duration {
+	var delayPolicyFunc DelayPolicyFunc = func(attempts uint, err error, retryConfig *Config) time.Duration {
 		return time.Second
 	}
 
@@ -22,7 +22,7 @@ func TestConfig_Apply(t *testing.T) {
 		WithMaxJitter(time.Second),
 	)
 
-	conf := Options{}
+	conf := Config{}
 	conf.Apply(opts)
 
 	assert.Equal(t, uint(100), conf.MaxAttemptTimes)
@@ -36,7 +36,7 @@ func TestRetryPolicy(t *testing.T) {
 	dur := DefaultDelayPolicy(0, nil, nil)
 	assert.Equal(t, 0*time.Millisecond, dur)
 
-	conf := Options{Delay: time.Second}
+	conf := Config{Delay: time.Second}
 	dur = FixedDelayPolicy(0, nil, &conf)
 	assert.Equal(t, time.Second, dur)
 
@@ -58,7 +58,7 @@ func TestRetryPolicy(t *testing.T) {
 
 	dur = Delay(0, nil, &conf)
 	assert.Equal(t, 0*time.Millisecond, dur)
-	delayPolicyFunc := func(attempts uint, err error, retryConfig *Options) time.Duration {
+	delayPolicyFunc := func(attempts uint, err error, retryConfig *Config) time.Duration {
 		return time.Second
 	}
 	conf.DelayPolicy = delayPolicyFunc
@@ -66,7 +66,7 @@ func TestRetryPolicy(t *testing.T) {
 	dur = Delay(0, nil, &conf)
 	assert.Equal(t, conf.MaxDelay, dur)
 
-	delayPolicyFunc2 := func(attempts uint, err error, retryConfig *Options) time.Duration {
+	delayPolicyFunc2 := func(attempts uint, err error, retryConfig *Config) time.Duration {
 		return time.Duration(math.MaxInt64)
 	}
 	delayFunc := CombineDelay(delayPolicyFunc2, delayPolicyFunc)

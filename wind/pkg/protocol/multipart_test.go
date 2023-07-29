@@ -127,7 +127,7 @@ func TestWriteMultipartFormFile(t *testing.T) {
 	// test file not found
 	assert.NotNil(t, WriteMultipartFormFile(w, multipartFile.ParamName, "test.go", multipartFile.Reader))
 
-	// Test Add File Function
+	// Test Addr File Function
 	err = AddFile(w, "responseCode", "./response.go")
 	if err != nil {
 		t.Fatalf("add file error: %s", err)

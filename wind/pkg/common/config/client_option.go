@@ -18,7 +18,7 @@ type ConnPoolState struct {
 	// 挂起的连接数量。
 	WaitConnNum int
 	// HostClient 地址
-	Add string
+	Addr string
 }
 
 type HostClientState interface {
@@ -116,7 +116,7 @@ type ClientOptions struct {
 	DisablePathNormalizing bool
 
 	// 与重试相关的所有配置
-	RetryConfig *retry.Options
+	RetryConfig *retry.Config
 
 	// 观察主机客户端的状态
 	HostClientStateObserve HostClientStateFunc

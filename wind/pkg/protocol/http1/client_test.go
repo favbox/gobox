@@ -1,20 +1,31 @@
 package http1
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/netpoll"
+	"github.com/favbox/gosky/wind/pkg/app/client/retry"
+	"github.com/favbox/gosky/wind/pkg/common/config"
 	errs "github.com/favbox/gosky/wind/pkg/common/errors"
+	"github.com/favbox/gosky/wind/pkg/common/test/assert"
 	"github.com/favbox/gosky/wind/pkg/common/test/mock"
+	"github.com/favbox/gosky/wind/pkg/common/utils"
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/protocol"
+	"github.com/favbox/gosky/wind/pkg/protocol/client"
 	"github.com/favbox/gosky/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/pkg/protocol/http1/resp"
 )
 
 type mockDialer struct {
@@ -116,4 +127,314 @@ func TestHostClient_MaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 
 func newSlowConnDialer(dialer func(network string, addr string) (network.Conn, error)) network.Dialer {
 	return &mockDialer{customDialConn: dialer}
+}
+
+func TestResponseReadBodyStream(t *testing.T) {
+	// small body
+	genBody := "abcdef4343"
+	s := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 5\r\n\r\n"
+	testContinueReadResponseBodyStream(t, s, genBody, 10, 5, 0, 5)
+	testContinueReadResponseBodyStream(t, s, genBody, 1, 5, 0, 0)
+
+	// big body (> 8193)
+	s1 := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 9216\r\nContent-Type: foo/bar\r\n\r\n"
+	genBody = strings.Repeat("1", 9*1024)
+	testContinueReadResponseBodyStream(t, s1, genBody, 10*1024, 5*1024, 4*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 10*1024, 1*1024, 8*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 10*1024, 9*1024, 0*1024, 0)
+
+	// normal stream
+	testContinueReadResponseBodyStream(t, s1, genBody, 1*1024, 5*1024, 4*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 1*1024, 1*1024, 8*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 1*1024, 9*1024, 0*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 5, 5*1024, 4*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 5, 1*1024, 8*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 5, 9*1024, 0, 0)
+
+	// critical point
+	testContinueReadResponseBodyStream(t, s1, genBody, 8*1024+1, 5*1024, 4*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 8*1024+1, 1*1024, 8*1024, 0)
+	testContinueReadResponseBodyStream(t, s1, genBody, 8*1024+1, 9*1024, 0*1024, 0)
+
+	// chunked body
+	s2 := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\n\r\ntrail"
+	testContinueReadResponseBodyStream(t, s2, "", 10*1024, 3, 5, 5)
+	s3 := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\n\r\n"
+	testContinueReadResponseBodyStream(t, s3, "", 10*1024, 3, 5, 0)
+}
+
+func testContinueReadResponseBodyStream(t *testing.T, header, body string, maxBodySize, firstRead, leftBytes, bytesLeftInReader int) {
+	mr := netpoll.NewReader(bytes.NewBufferString(header + body))
+	var r protocol.Response
+	if err := resp.ReadBodyStream(&r, mr, maxBodySize, nil); err != nil {
+		t.Fatalf("error when reading request body stream: %s", err)
+	}
+	fRead := firstRead
+	streamRead := make([]byte, fRead)
+	sR, _ := r.BodyStream().Read(streamRead)
+
+	if sR != firstRead {
+		t.Fatalf("should read %d from stream body, but got %d", firstRead, sR)
+	}
+
+	leftB, _ := io.ReadAll(r.BodyStream())
+	if len(leftB) != leftBytes {
+		t.Fatalf("should left %d bytes from stream body, but left %d", leftBytes, len(leftB))
+	}
+	if r.Header.ContentLength() > 0 {
+		gotBody := append(streamRead, leftB...)
+		if !bytes.Equal([]byte(body[:r.Header.ContentLength()]), gotBody) {
+			t.Fatalf("body read from stream is not equal to the origin. Got: %s", gotBody)
+		}
+	}
+
+	left, _ := mr.Next(mr.Len())
+
+	if len(left) != bytesLeftInReader {
+		fmt.Printf("##########header:%s,body:%s,%d:max,first:%d,left:%d,leftin:%d\n", header, body, maxBodySize, firstRead, leftBytes, bytesLeftInReader)
+		fmt.Printf("##########left: %s\n", left)
+		t.Fatalf("should left %d bytes in original reader. got %q", bytesLeftInReader, len(left))
+	}
+}
+
+func TestReadTimeoutPriority(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return mock.SlowReadDialer(addr)
+			}),
+			MaxConns:           1,
+			MaxConnWaitTimeout: 50 * time.Millisecond,
+			ReadTimeout:        3 * time.Second,
+		},
+		Addr: "foobar",
+	}
+
+	req := protocol.AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	req.SetOptions(config.WithReadTimeout(1 * time.Second))
+	resp := protocol.AcquireResponse()
+
+	ch := make(chan error, 1)
+	go func() {
+		ch <- c.Do(context.Background(), req, resp)
+	}()
+	select {
+	case <-time.After(time.Second * 2):
+		t.Fatalf("should use readTimeout in request options")
+	case err := <-ch:
+		assert.DeepEqual(t, errs.ErrTimeout.Error(), err.Error())
+	}
+}
+
+// mockConn for getting error when write binary data.
+type writeErrConn struct {
+	network.Conn
+}
+
+func (w writeErrConn) WriteBinary(b []byte) (n int, err error) {
+	return 0, errs.ErrConnectionClosed
+}
+
+func TestDoNonNilReqResp(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return &writeErrConn{
+						Conn: mock.NewConn("HTTP/1.1 400 OK\nContent-Length: 6\n\n123456"),
+					},
+					nil
+			}),
+		},
+	}
+	req := protocol.AcquireRequest()
+	resp := protocol.AcquireResponse()
+	req.SetHost("foobar")
+	retry, err := c.doNonNilReqResp(req, resp)
+	assert.False(t, retry)
+	assert.Nil(t, err)
+	assert.DeepEqual(t, resp.StatusCode(), 400)
+	assert.DeepEqual(t, resp.Body(), []byte("123456"))
+}
+
+func TestDoNonNilReqResp1(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return &writeErrConn{
+						Conn: mock.NewConn(""),
+					},
+					nil
+			}),
+		},
+	}
+	req := protocol.AcquireRequest()
+	resp := protocol.AcquireResponse()
+	req.SetHost("foobar")
+	retry, err := c.doNonNilReqResp(req, resp)
+	assert.True(t, retry)
+	assert.NotNil(t, err)
+}
+
+func TestWriteTimeoutPriority(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return mock.SlowWriteDialer(addr)
+			}),
+			MaxConns:           1,
+			MaxConnWaitTimeout: 50 * time.Millisecond,
+			WriteTimeout:       time.Second * 3,
+		},
+		Addr: "foobar",
+	}
+
+	req := protocol.AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	req.SetOptions(config.WithWriteTimeout(time.Second * 1))
+	resp := protocol.AcquireResponse()
+
+	ch := make(chan error, 1)
+	go func() {
+		ch <- c.Do(context.Background(), req, resp)
+	}()
+	select {
+	case <-time.After(time.Second * 2):
+		t.Fatalf("should use writeTimeout in request options")
+	case err := <-ch:
+		assert.DeepEqual(t, errs.ErrWriteTimeout.Error(), err.Error())
+	}
+}
+
+func TestDialTimeoutPriority(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer:             &slowDialer{},
+			MaxConns:           1,
+			MaxConnWaitTimeout: 50 * time.Millisecond,
+			DialTimeout:        time.Second * 3,
+		},
+		Addr: "foobar",
+	}
+
+	req := protocol.AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	req.SetOptions(config.WithDialTimeout(time.Second * 1))
+	resp := protocol.AcquireResponse()
+
+	ch := make(chan error, 1)
+	go func() {
+		ch <- c.Do(context.Background(), req, resp)
+	}()
+	select {
+	case <-time.After(time.Second * 2000):
+		t.Fatalf("should use dialTimeout in request options")
+	case err := <-ch:
+		assert.DeepEqual(t, errs.ErrDialTimeout.Error(), err.Error())
+	}
+}
+
+func TestStateObserve(t *testing.T) {
+	syncState := struct {
+		mu    sync.Mutex
+		state config.ConnPoolState
+	}{}
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return mock.SlowReadDialer(addr)
+			}),
+			StateObserve: func(hcs config.HostClientState) {
+				syncState.mu.Lock()
+				defer syncState.mu.Unlock()
+				syncState.state = hcs.ConnPoolState()
+			},
+			ObservationInterval: 50 * time.Millisecond,
+		},
+		Addr:   "foobar",
+		closed: make(chan struct{}),
+	}
+
+	c.SetDynamicConfig(&client.DynamicConfig{
+		Addr: utils.AddMissingPort(c.Addr, true),
+	})
+
+	time.Sleep(500 * time.Millisecond)
+	assert.Nil(t, c.Close())
+	syncState.mu.Lock()
+	assert.DeepEqual(t, "foobar:443", syncState.state.Addr)
+	syncState.mu.Unlock()
+}
+
+func TestCachedTLSConfig(t *testing.T) {
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				return mock.SlowReadDialer(addr)
+			}),
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+		Addr:  "foobar",
+		IsTLS: true,
+	}
+
+	cfg1 := c.cachedTLSConfig("foobar")
+	cfg2 := c.cachedTLSConfig("baz")
+	assert.NotEqual(t, cfg1, cfg2)
+	cfg3 := c.cachedTLSConfig("foobar")
+	assert.DeepEqual(t, cfg1, cfg3)
+}
+
+type retryConn struct {
+	network.Conn
+}
+
+func (w retryConn) SetWriteTimeout(t time.Duration) error {
+	return errors.New("should retry")
+}
+
+func TestRetry(t *testing.T) {
+	var times int32
+	c := &HostClient{
+		ClientOptions: &ClientOptions{
+			Dialer: newSlowConnDialer(func(network, addr string) (network.Conn, error) {
+				times++
+				if times < 3 {
+					return &retryConn{
+						Conn: mock.NewConn(""),
+					}, nil
+				}
+				return mock.NewConn("HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: foo/bar\r\n\r\n0123456789"), nil
+			}),
+			RetryConfig: &retry.Config{
+				MaxAttemptTimes: 5,
+				Delay:           time.Millisecond * 10,
+			},
+			RetryIfFunc: func(req *protocol.Request, resp *protocol.Response, err error) bool {
+				return resp.Header.ContentLength() != 10
+			},
+		},
+		Addr: "foobar",
+	}
+
+	req := protocol.AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	req.SetOptions(config.WithWriteTimeout(time.Millisecond * 100))
+	resp := protocol.AcquireResponse()
+
+	ch := make(chan error, 1)
+	go func() {
+		ch <- c.Do(context.Background(), req, resp)
+	}()
+	select {
+	case <-time.After(time.Second * 2):
+		t.Fatalf("should use writeTimeout in request options")
+	case err := <-ch:
+		assert.Nil(t, err)
+		assert.True(t, times == 3)
+		assert.DeepEqual(t, resp.StatusCode(), 200)
+		assert.DeepEqual(t, resp.Body(), []byte("0123456789"))
+	}
 }

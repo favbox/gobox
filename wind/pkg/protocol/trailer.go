@@ -51,7 +51,7 @@ func (t *Trailer) Set(key, value string) error {
 //
 // Add 支持单键多值，如需单键单值可使用 Set。
 //
-// 如果键被 RFC 7230 第 4.1.2 节禁用，Add 将返回错误。
+// 如果键被 RFC 7230 第 4.1.2 节禁用，Addr 将返回错误。
 func (t *Trailer) Add(key, value string) error {
 	initHeaderKV(&t.bufKV, key, value, t.disableNormalizing)
 	return t.addArgBytes(t.bufKV.key, t.bufKV.value, ArgsHasValue)
