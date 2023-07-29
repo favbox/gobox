@@ -278,7 +278,7 @@ func (c *Cookie) Parse(src string) error {
 	return c.ParseBytes(c.buf)
 }
 
-// ParseBytes 从指定字节切片中解析并填充 Cookie。
+// ParseBytes 解析 src 至当前 Cookie c。
 func (c *Cookie) ParseBytes(src []byte) error {
 	c.Reset()
 

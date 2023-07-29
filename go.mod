@@ -3,6 +3,7 @@ module github.com/favbox/gosky
 go 1.20
 
 require (
+	github.com/bytedance/mockey v1.2.4
 	github.com/cloudwego/netpoll v0.3.2
 	github.com/stretchr/testify v1.8.4
 	github.com/zeromicro/go-zero v1.5.3
@@ -12,7 +13,6 @@ require (
 
 require (
 	github.com/bytedance/gopkg v0.0.0-20220413063733-65bf48ffb3a7 // indirect
-	github.com/bytedance/mockey v1.2.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect

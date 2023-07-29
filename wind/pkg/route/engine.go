@@ -71,6 +71,7 @@ type Engine struct {
 	enableTrace bool
 
 	// TODO 用于管理协议层
+	protocolSuite *suite.Config
 
 	// RequestContext 连接池
 	ctxPool sync.Pool
@@ -98,6 +99,10 @@ type Engine struct {
 	// 自定义函数
 	clientIPFunc  app.ClientIP
 	formValueFunc app.FormValueFunc
+}
+
+func (engine *Engine) AddProtocol(protocol string, factory any) {
+	engine.protocolSuite.Add(protocol, factory)
 }
 
 // NewContext 创建一个无请求/响应的纯粹请求上下文。

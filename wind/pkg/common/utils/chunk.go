@@ -12,7 +12,7 @@ import (
 
 var errBrokenChunk = errors.NewPublic("无法在分块数据结尾找到 crlf")
 
-// ParseChunkSize 解析 r 的分块读取大小。
+// ParseChunkSize 解析 r 的分块个数。
 func ParseChunkSize(r network.Reader) (int, error) {
 	n, err := bytesconv.ReadHexInt(r)
 	if err != nil {

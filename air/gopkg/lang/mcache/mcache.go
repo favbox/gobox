@@ -59,7 +59,7 @@ func Malloc(size int, capacity ...int) []byte {
 func Free(buf []byte) {
 	size := cap(buf)
 
-	// 跳过容量为奇数的字节切片
+	// 跳过容量为奇数的字节切片（Malloc 创建的 size 都是 2^n，即偶数）
 	if !isPowerOfTwo(size) {
 		return
 	}

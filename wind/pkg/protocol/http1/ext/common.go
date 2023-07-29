@@ -20,7 +20,7 @@ const maxContentLengthInStream = 8 * 1024
 
 var errBrokenChunk = errs.NewPublic("无法在分块数据结尾找到 crlf").SetMeta("发生于 readBodyChunked")
 
-// MustPeekBuffered 必须从网络阅读器 r 中返回数据，否则就触发恐慌。
+// MustPeekBuffered 必须返回 r 中全部数据，若无数据或出错就触发恐慌。
 func MustPeekBuffered(r network.Reader) []byte {
 	l := r.Len()
 	buf, err := r.Peek(l)
@@ -31,7 +31,7 @@ func MustPeekBuffered(r network.Reader) []byte {
 	return buf
 }
 
-// MustDiscard 必须跳过网络阅读器 r 的前 n 个字节，否则就触发恐慌。
+// MustDiscard 必须跳过 r 的前 n 个字节，否则就触发恐慌。
 func MustDiscard(r network.Reader, n int) {
 	if err := r.Skip(n); err != nil {
 		panic(fmt.Sprintf("bufio.Reader.Discard(%d) failed: %s", n, err))
@@ -129,64 +129,24 @@ func ReadTrailer(t *protocol.Trailer, r network.Reader) error {
 	}
 }
 
-func tryReadTrailer(t *protocol.Trailer, r network.Reader, n int) error {
-	b, err := r.Peek(n)
-	if len(b) == 0 {
-		// 若超时则返回 ErrTimeout
-		if err != nil && strings.Contains(err.Error(), "timeout") {
-			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "读取响应标头")
+func SkipTrailer(r network.Reader) error {
+	n := 1
+	for {
+		err := trySkipTrailer(r, n)
+		if err == nil {
+			return nil
 		}
-
-		if n == 1 || err == io.EOF {
-			return io.EOF
-		}
-
-		return errs.NewPublicf("读取请求挂车失败: %w", err)
-	}
-
-	b = MustPeekBuffered(r)
-	headersLen, errParse := parseTrailer(t, b)
-	if errParse != nil {
-		if err == io.EOF {
+		if !errors.Is(err, errs.ErrNeedMore) {
 			return err
 		}
-		return HeaderError("response", err, errParse, b)
-	}
-	MustDiscard(r, headersLen)
-	return nil
-}
+		// 无更多可用数据，尝试阻塞 peek(通过 netpoll)
+		if n == r.Len() {
+			n++
 
-func parseTrailer(t *protocol.Trailer, buf []byte) (int, error) {
-	// 跳过任何长度为 0 的区块
-	if buf[0] == '0' {
-		skip := len(bytestr.StrCRLF) + 1
-		if len(buf) < skip {
-			return 0, io.EOF
+			continue
 		}
-		buf = buf[skip:]
+		n = r.Len()
 	}
-
-	var s HeaderScanner
-	s.B = buf
-	s.DisableNormalizing = t.IsDisableNormalizing()
-	var err error
-	for s.Next() {
-		if len(s.Key) > 0 {
-			// 键名不能包含空格和制表符
-			if bytes.IndexByte(s.Key, ' ') != -1 || bytes.IndexByte(s.Key, '\t') != -1 {
-				err = fmt.Errorf("trailer 键名不能包含空格和制表符 %s", s.Key)
-				continue
-			}
-			err = t.UpdateArgBytes(s.Key, s.Value)
-		}
-	}
-	if s.Err != nil {
-		return 0, s.Err
-	}
-	if err != nil {
-		return 0, err
-	}
-	return s.HLen, nil
 }
 
 // LimitedReaderSize 返回定量阅读器的定量值。
@@ -454,4 +414,108 @@ func round2(n int) int {
 		x++
 	}
 	return 1 << x
+}
+
+func tryReadTrailer(t *protocol.Trailer, r network.Reader, n int) error {
+	b, err := r.Peek(n)
+	if len(b) == 0 {
+		// 若超时则返回 ErrTimeout
+		if err != nil && strings.Contains(err.Error(), "timeout") {
+			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "读取响应标头")
+		}
+
+		if n == 1 || err == io.EOF {
+			return io.EOF
+		}
+
+		return errs.NewPublicf("读取请求挂车失败: %w", err)
+	}
+
+	b = MustPeekBuffered(r)
+	headersLen, errParse := parseTrailer(t, b)
+	if errParse != nil {
+		if err == io.EOF {
+			return err
+		}
+		return HeaderError("response", err, errParse, b)
+	}
+	MustDiscard(r, headersLen)
+	return nil
+}
+
+func parseTrailer(t *protocol.Trailer, buf []byte) (int, error) {
+	// 跳过任何长度为 0 的区块
+	if buf[0] == '0' {
+		skip := len(bytestr.StrCRLF) + 1
+		if len(buf) < skip {
+			return 0, io.EOF
+		}
+		buf = buf[skip:]
+	}
+
+	var s HeaderScanner
+	s.B = buf
+	s.DisableNormalizing = t.IsDisableNormalizing()
+	var err error
+	for s.Next() {
+		if len(s.Key) > 0 {
+			// 键名不能包含空格和制表符
+			if bytes.IndexByte(s.Key, ' ') != -1 || bytes.IndexByte(s.Key, '\t') != -1 {
+				err = fmt.Errorf("trailer 键名不能包含空格和制表符 %s", s.Key)
+				continue
+			}
+			err = t.UpdateArgBytes(s.Key, s.Value)
+		}
+	}
+	if s.Err != nil {
+		return 0, s.Err
+	}
+	if err != nil {
+		return 0, err
+	}
+	return s.HLen, nil
+}
+
+func trySkipTrailer(r network.Reader, n int) error {
+	b, err := r.Peek(n)
+	if len(b) == 0 {
+		// Return ErrTimeout on any timeout.
+		if err != nil && strings.Contains(err.Error(), "timeout") {
+			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "read response header")
+		}
+
+		if n == 1 || err == io.EOF {
+			return io.EOF
+		}
+
+		return errs.NewPublicf("error when reading request trailer: %w", err)
+	}
+	b = MustPeekBuffered(r)
+	headersLen, errParse := skipTrailer(b)
+	if errParse != nil {
+		if err == io.EOF {
+			return err
+		}
+		return HeaderError("response", err, errParse, b)
+	}
+	MustDiscard(r, headersLen)
+	return nil
+}
+
+func skipTrailer(buf []byte) (int, error) {
+	skip := 0
+	strCRLFLen := len(bytestr.StrCRLF)
+	for {
+		index := bytes.Index(buf, bytestr.StrCRLF)
+		if index == -1 {
+			return 0, errs.ErrNeedMore
+		}
+
+		buf = buf[index+strCRLFLen:]
+		skip += index + strCRLFLen
+
+		if index == 0 {
+			return skip, nil
+		}
+	}
 }

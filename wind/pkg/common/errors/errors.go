@@ -15,7 +15,7 @@ var (
 	ErrNothingRead      = errors.New("未读取任何内容")
 	ErrNeedMore         = errors.New("需要更多数据")
 	ErrBodyTooLarge     = errors.New("正文大小超过限制")
-	ErrChunkedStream    = errors.New("分块的正文流")
+	ErrChunkedStream    = errors.New("错误分块的正文流")
 )
 
 type ErrorType uint64

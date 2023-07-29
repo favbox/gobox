@@ -22,14 +22,74 @@ var (
 	errBodyTooLarge        = errs.New(errs.ErrBodyTooLarge, errs.ErrorTypePublic, "http1/req")
 )
 
-// Write 将请求 req 写入网络编写器 w。
-//
-// Write 出于性能原因不会将请求冲刷 到 w。
-func Write(req *protocol.Request, w network.Writer) error {
-	return write(req, w, false)
+// ReadBodyStream 流式读取 zr 到请求 req。
+func ReadBodyStream(req *protocol.Request, zr network.Reader, maxBodySize int, getOnly, preParseMultipartForm bool) error {
+	if getOnly && !req.Header.IsGet() {
+		return errGETOnly
+	}
+
+	if req.MayContinue() {
+		return nil
+	}
+
+	return ContinueReadBodyStream(req, zr, maxBodySize, preParseMultipartForm)
 }
 
-// Read 从指定的网络阅读器 r 中读取请求（包括正文）到 req。
+// ContinueReadBodyStream 如果请求标头包含“Expect:100 continue”，则读取流中的请求正文。
+func ContinueReadBodyStream(req *protocol.Request, zr network.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
+	var err error
+	contentLength := req.Header.ContentLength()
+	if contentLength > 0 {
+		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+			// 已知长度的预读多部分表单数据。
+			// 通过此方式，我们限制了大文件上传的内存使用，因为如果文件大小超过了 DefaultMaxInMemoryFileSize
+			// 将会流式输入到临时文件。
+			req.SetMultipartFormBoundary(string(req.Header.MultipartFormBoundary()))
+			if len(req.MultipartFormBoundary()) > 0 && len(req.Header.PeekContentEncoding()) == 0 {
+				err = protocol.ParseMultipartForm(zr.(io.Reader), req, contentLength, consts.DefaultMaxInMemoryFileSize)
+				if err != nil {
+					req.Reset()
+				}
+				return err
+			}
+		}
+	}
+
+	if contentLength == -2 {
+		// 不忽略正文的请求（非 GET、HEAD），则设置内容长度。
+		// 标识主体对 http 请求没有意义，因为主体的末尾是由连接关闭决定的。
+		// 所以，对于没有 'Content-Length' 和 'Transfer-Encoding' 标头的请求来说，只需忽略请求正文即可。
+
+		// 参见 https://tools.ietf.org/html/rfc7230#section-3.3.2
+		if !req.Header.IgnoreBody() {
+			req.Header.SetContentLength(0)
+		}
+		return nil
+	}
+
+	bodyBuf := req.BodyBuffer()
+	bodyBuf.Reset()
+	bodyBuf.B, err = ext.ReadBody(zr, contentLength, maxBodySize, bodyBuf.B)
+	if err != nil {
+		if errors.Is(err, errs.ErrBodyTooLarge) {
+			req.Header.SetContentLength(contentLength)
+			req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
+
+			return nil
+		}
+		if errors.Is(err, errs.ErrChunkedStream) {
+			req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
+			return nil
+		}
+		req.Reset()
+		return err
+	}
+
+	req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
+	return nil
+}
+
+// Read 读取 r 到请求 req（包括正文）。
 //
 // 为删除临时上传文件，必在读取多部分表单请求后调用 RemoveMultipartFormFiles 或 Reset。
 //
@@ -44,7 +104,7 @@ func Read(req *protocol.Request, r network.Reader, preParse ...bool) error {
 	return ReadHeaderAndLimitBody(req, r, 0, preParse...)
 }
 
-// ReadHeaderAndLimitBody 从指定的网络阅读器 r 中读取请求（包括限定长度的正文）到 req。
+// ReadHeaderAndLimitBody 读取 r 到请求 req，限定正文大小。
 //
 // 为删除临时上传文件，必在读取多部分表单请求后调用 RemoveMultipartFormFiles 或 Reset。
 //
@@ -84,6 +144,7 @@ func ReadLimitBody(req *protocol.Request, r network.Reader, maxBodySize int, get
 	return ContinueReadBody(req, r, maxBodySize, preParseMultipartForm)
 }
 
+// ContinueReadBody 如果请求标头包含“Expect:100 continue”，则读取请求正文。
 func ContinueReadBody(req *protocol.Request, r network.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.ContentLength()
@@ -147,58 +208,62 @@ func ContinueReadBody(req *protocol.Request, r network.Reader, maxBodySize int, 
 	return nil
 }
 
-func ContinueReadBodyStream(req *protocol.Request, zr network.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
+// Write 将请求 req 写入网络编写器 w。
+//
+// Write 出于性能原因不会将请求冲刷 到 w。
+func Write(req *protocol.Request, w network.Writer) error {
+	return write(req, w, false)
+}
+
+// ProxyWrite 类似 Write，但
+func ProxyWrite(req *protocol.Request, w network.Writer) error {
+	return write(req, w, true)
+}
+
+func handleMultipart(req *protocol.Request) error {
+	if len(req.MultipartFiles()) == 0 && len(req.MultipartFields()) == 0 {
+		return nil
+	}
+
 	var err error
-	contentLength := req.Header.ContentLength()
-	if contentLength > 0 {
-		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// 已知长度的预读多部分表单数据。
-			// 通过此方式，我们限制了大文件上传的内存使用，因为如果文件大小超过了 DefaultMaxInMemoryFileSize
-			// 将会流式输入到临时文件。
-			req.SetMultipartFormBoundary(string(req.Header.MultipartFormBoundary()))
-			if len(req.MultipartFormBoundary()) > 0 && len(req.Header.PeekContentEncoding()) == 0 {
-				err = protocol.ParseMultipartForm(r.(io.Reader), req, contentLength, consts.DefaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
+	bodyBuffer := &bytes.Buffer{}
+	w := multipart.NewWriter(bodyBuffer)
+	if len(req.MultipartFiles()) > 0 {
+		for _, f := range req.MultipartFiles() {
+			if f.Reader != nil {
+				err = protocol.WriteMultipartFormFile(w, f.ParamName, f.Name, f.Reader)
+			} else {
+				err = protocol.AddFile(w, f.ParamName, f.Name)
+			}
+			if err != nil {
 				return err
 			}
 		}
 	}
 
-	if contentLength == -2 {
-		// 不忽略正文的请求（非 GET、HEAD），则设置内容长度。
-		// 标识主体对 http 请求没有意义，因为主体的末尾是由连接关闭决定的。
-		// 所以，对于没有 'Content-Length' 和 'Transfer-Encoding' 标头的请求来说，只需忽略请求正文即可。
-
-		// 参见 https://tools.ietf.org/html/rfc7230#section-3.3.2
-		if !req.Header.IgnoreBody() {
-			req.Header.SetContentLength(0)
+	if len(req.MultipartFields()) > 0 {
+		for _, mf := range req.MultipartFields() {
+			if err = protocol.AddMultipartFormField(w, mf); err != nil {
+				return err
+			}
 		}
-		return nil
 	}
 
-	bodyBuf := req.BodyBuffer()
-	bodyBuf.Reset()
-	bodyBuf.B, err = ext.ReadBody(r, contentLength, maxBodySize, bodyBuf.B)
-	if err != nil {
-		if errors.Is(err, errs.ErrBodyTooLarge) {
-			req.Header.SetContentLength(contentLength)
-			req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
-
-			return nil
-		}
-		if errors.Is(err, errs.ErrChunkedStream) {
-			req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
-			return nil
-		}
-		req.Reset()
+	req.Header.Set(consts.HeaderContentType, w.FormDataContentType())
+	if err = w.Close(); err != nil {
 		return err
 	}
 
-	req.ConstructBodyStream(bodyBuf, ext.AcquireBodyStream(bodyBuf, zr, req.Header.Trailer(), contentLength))
+	r := multipart.NewReader(bodyBuffer, w.Boundary())
+	f, err := r.ReadForm(int64(bodyBuffer.Len()))
+	if err != nil {
+		return err
+	}
+	protocol.SetMultipartFormWithBoundary(req, f, w.Boundary())
+
 	return nil
 }
+
 func write(req *protocol.Request, w network.Writer, usingProxy bool) error {
 	if len(req.Header.Host()) == 0 || req.IsURIParsed() {
 		uri := req.URI()
@@ -274,50 +339,6 @@ func write(req *protocol.Request, w network.Writer, usingProxy bool) error {
 	} else if len(body) > 0 {
 		return fmt.Errorf("非 POST 请求存在未处理的非空正文 %q", body)
 	}
-	return nil
-}
-
-func handleMultipart(req *protocol.Request) error {
-	if len(req.MultipartFiles()) == 0 && len(req.MultipartFields()) == 0 {
-		return nil
-	}
-
-	var err error
-	bodyBuffer := &bytes.Buffer{}
-	w := multipart.NewWriter(bodyBuffer)
-	if len(req.MultipartFiles()) > 0 {
-		for _, f := range req.MultipartFiles() {
-			if f.Reader != nil {
-				err = protocol.WriteMultipartFormFile(w, f.ParamName, f.Name, f.Reader)
-			} else {
-				err = protocol.AddFile(w, f.ParamName, f.Name)
-			}
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if len(req.MultipartFields()) > 0 {
-		for _, mf := range req.MultipartFields() {
-			if err = protocol.AddMultipartFormField(w, mf); err != nil {
-				return err
-			}
-		}
-	}
-
-	req.Header.Set(consts.HeaderContentType, w.FormDataContentType())
-	if err = w.Close(); err != nil {
-		return err
-	}
-
-	r := multipart.NewReader(bodyBuffer, w.Boundary())
-	f, err := r.ReadForm(int64(bodyBuffer.Len()))
-	if err != nil {
-		return err
-	}
-	protocol.SetMultipartFormWithBoundary(req, f, w.Boundary())
-
 	return nil
 }
 

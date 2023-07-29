@@ -104,7 +104,7 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 	return date.UTC().AppendFormat(dst, http.TimeFormat)
 }
 
-// ParseUintBuf 从字节缓冲区中解析出 uint。
+// ParseUintBuf 从 b 中解析出 uint。
 func ParseUintBuf(b []byte) (v int, n int, err error) {
 	n = len(b)
 	if n == 0 {

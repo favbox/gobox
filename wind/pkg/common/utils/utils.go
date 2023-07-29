@@ -64,7 +64,7 @@ func NameOfFunction(f any) string {
 	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }
 
-// NextLine 返回字节切片中第一个行及剩余行。
+// NextLine 返回 b 中第一个行及剩余行。
 func NextLine(b []byte) ([]byte, []byte, error) {
 	nNext := bytes.IndexByte(b, '\n')
 	if nNext < 0 {

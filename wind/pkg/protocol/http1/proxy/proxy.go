@@ -4,14 +4,29 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"time"
 
+	"github.com/favbox/gosky/wind/internal/bytesconv"
 	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/protocol"
 	"github.com/favbox/gosky/wind/pkg/protocol/consts"
+	reqI "github.com/favbox/gosky/wind/pkg/protocol/http1/req"
+	respI "github.com/favbox/gosky/wind/pkg/protocol/http1/resp"
 )
 
+// SetProxyAuthHeader 基于 proxyURI 为 h 设置代理授权标头。
+func SetProxyAuthHeader(h *protocol.RequestHeader, proxyURI *protocol.URI) {
+	if username := proxyURI.Username(); username != nil {
+		password := proxyURI.Password()
+		auth := base64.StdEncoding.EncodeToString(bytesconv.S2b(bytesconv.B2s(username) + ":" + bytesconv.B2s(password)))
+		h.Set("Proxy-Authorization", "Basic "+auth)
+	}
+}
+
+// SetupProxy 设置代理链接。
 func SetupProxy(conn network.Conn, addr string, proxyURI *protocol.URI, tlsConfig *tls.Config, isTLS bool, dialer network.Dialer) (network.Conn, error) {
 	var err error
 	if bytes.Equal(proxyURI.Scheme(), bytestr.StrHTTPS) {
@@ -24,7 +39,7 @@ func SetupProxy(conn network.Conn, addr string, proxyURI *protocol.URI, tlsConfi
 	switch {
 	case proxyURI == nil:
 		// 啥也不干。没用代理。
-	case isTLS:
+	case isTLS: // 目标地址是 https， 则发一个 CONNECT 请求试试
 		connectReq, connectResp := protocol.AcquireRequest(), protocol.AcquireResponse()
 		defer func() {
 			protocol.ReleaseRequest(connectReq)
@@ -48,9 +63,45 @@ func SetupProxy(conn network.Conn, addr string, proxyURI *protocol.URI, tlsConfi
 		go func() {
 			defer close(didReadResponse)
 
-			reqI
+			err = reqI.Write(connectReq, conn)
+			if err != nil {
+				return
+			}
+
+			err = conn.Flush()
+			if err != nil {
+				return
+			}
+
+			err = respI.Read(connectResp, conn)
 		}()
-		select {}
+		select {
+		case <-connectCtx.Done():
+			conn.Close()
+			<-didReadResponse
+
+			return nil, connectCtx.Err()
+		case <-didReadResponse:
+		}
+
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+
+		if connectResp.StatusCode() != consts.StatusOK {
+			conn.Close()
+
+			return nil, errors.NewPublic(consts.StatusMessage(connectResp.StatusCode()))
+		}
+	}
+
+	// 代理 + HTTPS，转为 TLS 连接
+	if proxyURI != nil && isTLS {
+		conn, err = dialer.AddTLS(conn, tlsConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return conn, nil

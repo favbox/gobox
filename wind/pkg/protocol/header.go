@@ -1230,7 +1230,7 @@ func (h *ResponseHeader) GetProtocol() string {
 	return h.protocol
 }
 
-// Header 返回整个响应头信息的字节切片形式。
+// Header 返回整个响应头的字节切片形式。
 //
 // 返回值在下次调用 ResponseHeader 前一直有效。
 func (h *ResponseHeader) Header() []byte {
@@ -1390,7 +1390,7 @@ func (h *ResponseHeader) ResetConnectionClose() {
 	}
 }
 
-// ResetSkipNormalize 重置响应标头，但保留标头名的规范化设置。
+// ResetSkipNormalize 重置响应头，但保留规范化设置。
 func (h *ResponseHeader) ResetSkipNormalize() {
 	h.protocol = ""
 	h.connectionClose = false
@@ -1714,7 +1714,7 @@ func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	return releaseArg(cookies)
 }
 
-// 将 key 加入 kv 后按需规范化并返回。
+// 将 key 加入 kv 后按需规范化并返回新的 key。
 func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
 	kv.key = append(kv.key[:0], key...)
 	utils.NormalizeHeaderKey(kv.key, disableNormalizing)

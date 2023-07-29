@@ -83,10 +83,10 @@ var (
 	StrClose               = []byte("close")
 	StrGzip                = []byte("gzip")
 	StrDeflate             = []byte("deflate")
-	StrKeepAlive           = []byte("keep-alive")
+	StrKeepAlive           = []byte("keep-alive") // 用于指明连接为保活的长连接
 	StrUpgrade             = []byte("Upgrade")
 	StrChunked             = []byte("chunked")
-	StrIdentity            = []byte("identity")
+	StrIdentity            = []byte("identity") // 用于指代编码形式为：自身（如未经压缩和修改）
 	Str100Continue         = []byte("100-continue")
 	StrPostArgsContentType = []byte("application/x-www-form-urlencoded")
 	StrMultipartFormData   = []byte("multipart/form-data")

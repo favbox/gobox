@@ -20,6 +20,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network/dialer"
 	"github.com/favbox/gosky/wind/pkg/protocol"
 	"github.com/favbox/gosky/wind/pkg/protocol/client"
+	"github.com/favbox/gosky/wind/pkg/protocol/http1/proxy"
 )
 
 var (
@@ -434,6 +435,8 @@ func dialAddr(addr string, dial network.Dialer, dialDualStack bool, tlsConfig *t
 	if proxyURI != nil {
 		conn, err = proxy.SetupProxy(conn, addr, proxyURI, tlsConfig, isTLS, dial)
 	}
+
+	// TODO 待完善
 }
 
 func (c *HostClient) nextAddr() string {

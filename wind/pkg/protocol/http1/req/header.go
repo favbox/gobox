@@ -17,14 +17,14 @@ import (
 
 var errEOFReadHeader = errs.NewPublic("读取请求标头错误：EOF")
 
-// WriteHeader 将请求标头 h 写入 w。
+// WriteHeader 写入请求头 h 至 w。
 func WriteHeader(h *protocol.RequestHeader, w network.Writer) error {
 	header := h.Header()
 	_, err := w.WriteBinary(header)
 	return err
 }
 
-// ReadHeader 从网络阅读器 r 中读取请求标头至 h。
+// ReadHeader 读取 r 至 请求头 h。
 func ReadHeader(h *protocol.RequestHeader, r network.Reader) error {
 	n := 1
 	for {
@@ -46,6 +46,7 @@ func ReadHeader(h *protocol.RequestHeader, r network.Reader) error {
 	}
 }
 
+// 先尝试读取 n 个字节，若无误再读取全部字节至请求头。
 func tryRead(h *protocol.RequestHeader, r network.Reader, n int) error {
 	h.ResetSkipNormalize()
 	b, err := r.Peek(n)

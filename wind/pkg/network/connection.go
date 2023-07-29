@@ -20,10 +20,10 @@ type Reader interface {
 	// Skip 跳过接下来的 n 个字节。
 	Skip(n int) error
 
-	// ReadByte 通过读指针前进来读取下一个字节。
+	// ReadByte 读取接下来的 1 个字节并移动指针。
 	ReadByte() (byte, error)
 
-	// ReadBinary 通过读指针前进来读取下 n 个字节。
+	// ReadBinary 读取接下来的 n 个字节，并移动指针。
 	ReadBinary(n int) (p []byte, err error)
 
 	// Release 释放所有读取切片占用的内存。

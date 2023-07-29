@@ -148,15 +148,15 @@ var (
 	}
 )
 
-// StatusMessage 返回指定状态码的 HTTP 状态消息。
+// StatusMessage 返回指定 HTTP 状态码的状态消息。
 func StatusMessage(statusCode int) string {
 	if statusCode < statusMessageMin || statusCode > statusMessageMax {
-		return "Unknown Status Code"
+		return "未知状态码"
 	}
 
 	s := statusMessages[statusCode]
 	if s == "" {
-		s = "Unknown Status Code"
+		s = "未知状态码"
 	}
 	return s
 }
