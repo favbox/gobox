@@ -144,7 +144,7 @@ func WithWriteTimeout(t time.Duration) RequestOption {
 }
 
 // WithRequestTimeout 设置整个请求的超时时长。
-// 若超时，客户端会推出请求。
+// 若超时，客户端会退出请求。
 //
 // 这是请求级配置，优先于客户端级别的配置。
 func WithRequestTimeout(t time.Duration) RequestOption {

@@ -17,7 +17,7 @@ import (
 const defaultMaxRedirectsCount = 16
 
 var (
-	errTimeout          = errors.New(errors.ErrTimeout, errors.ErrorTypePublic, "主机客户端")
+	errTimeout          = errors.New(errors.ErrTimeout, errors.ErrorTypePublic, "host client")
 	errTooManyRedirects = errors.NewPublic("执行请求时检测到太多重定向")
 	errMissingLocation  = errors.NewPublic("缺少重定向的位置标头")
 

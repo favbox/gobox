@@ -19,6 +19,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/common/config"
 	errs "github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/common/hlog"
+	"github.com/favbox/gosky/wind/pkg/common/timer"
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/network/dialer"
 	"github.com/favbox/gosky/wind/pkg/protocol"
@@ -30,122 +31,11 @@ import (
 )
 
 var (
-	startTimeUnix = time.Now().Unix()
-
 	clientConnPool sync.Pool
 
 	errTimeout          = errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "host client")
-	errConnectionClosed = errs.NewPublic("服务器在返回响应前已关闭了连接。要确保服务器在关闭连接前返回 'Connection: close' 响应标头")
+	errConnectionClosed = errs.NewPublic("服务器在返回响应前已关闭了连接。要确保服务器在关闭连接前返回 'Connection: close' 响应头")
 )
-
-type clientConn struct {
-	c network.Conn
-
-	createdTime time.Time
-	lastUseTime time.Time
-}
-
-type wantConn struct {
-	ready chan struct{}
-	mu    sync.Mutex // 保护 conn, err, close(ready)
-	conn  *clientConn
-	err   error
-}
-
-// 尝试传递 conn, err 给当前 w，并汇报是否成功。
-func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.conn != nil || w.err != nil {
-		return false
-	}
-	w.conn = conn
-	w.err = err
-	if w.conn == nil && w.err == nil {
-		panic("wind: 内部错误: 滥用 tryDeliver")
-	}
-	close(w.ready)
-	return true
-}
-
-// 返回该等待连接是否还在等待答案（连接或错误）
-func (w *wantConn) waiting() bool {
-	select {
-	case <-w.ready:
-		return false
-	default:
-		return true
-	}
-}
-
-// 标记 w 不在等待结果（如：取消了）
-// 如果连接已被传递，则调用 HostClient.releaseConn 进行释放。
-func (w *wantConn) close(c *HostClient, err error) {
-	w.mu.Lock()
-	if w.conn == nil && w.err == nil {
-		close(w.ready) // 在未来传递中发现不当行为
-	}
-
-	conn := w.conn
-	w.conn = nil
-	w.err = err
-	w.mu.Unlock()
-
-	if conn != nil {
-		c.releaseConn(conn)
-	}
-}
-
-type wantConnQueue struct {
-	head    []*wantConn
-	headPos int
-	tail    []*wantConn
-}
-
-// 返回队列中的连接数。
-func (q *wantConnQueue) len() int {
-	return len(q.head) - q.headPos + len(q.tail)
-}
-
-// 返回队首的等待连接但不删除它。
-func (q *wantConnQueue) peekFront() *wantConn {
-	if q.headPos < len(q.head) {
-		return q.head[q.headPos]
-	}
-	if len(q.tail) > 0 {
-		return q.tail[0]
-	}
-	return nil
-}
-
-// 移除并返回队首的等待连接。
-func (q *wantConnQueue) popFront() *wantConn {
-	if q.headPos >= len(q.head) {
-		if len(q.tail) == 0 {
-			return nil
-		}
-		// 把尾巴当做新的头，并清掉尾巴。
-		q.head, q.headPos, q.tail = q.tail, 0, q.head[:0]
-	}
-
-	w := q.head[q.headPos]
-	q.head[q.headPos] = nil
-	q.headPos++
-	return w
-}
-
-// 清掉队首不再等待的连接，并返回其是否已被弹出。
-func (q *wantConnQueue) clearFront() (cleaned bool) {
-	for {
-		w := q.peekFront()
-		if w == nil || w.waiting() {
-			return cleaned
-		}
-		q.popFront()
-		cleaned = true
-	}
-}
 
 type ClientOptions struct {
 	// 客户端名称。用于 User-Agent 请求标头。
@@ -508,6 +398,8 @@ func (c *HostClient) GetURLTimeout(ctx context.Context, dst []byte, url string, 
 func (c *HostClient) Post(ctx context.Context, dst []byte, url string, postArgs *protocol.Args) (statusCode int, body []byte, err error) {
 	return client.PostURL(ctx, dst, url, postArgs, c)
 }
+
+var startTimeUnix = time.Now().Unix()
 
 // LastUseTime 返回客户端上次使用的时间。
 func (c *HostClient) LastUseTime() time.Time {
@@ -943,7 +835,7 @@ func updateReqTimeout(reqTimeout, compareTimeout time.Duration, before time.Time
 		return false, left
 	}
 
-	if left < compareTimeout {
+	if left > compareTimeout {
 		return false, compareTimeout
 	}
 
@@ -962,14 +854,14 @@ func (c *HostClient) preHandleConfig(o *config.RequestOptions) requestConfig {
 		readTimeout:  c.ReadTimeout,
 		writeTimeout: c.WriteTimeout,
 	}
-	if o.DialTimeout() > 0 {
-		rc.dialTimeout = o.DialTimeout()
-	}
 	if o.ReadTimeout() > 0 {
 		rc.readTimeout = o.ReadTimeout()
 	}
 	if o.WriteTimeout() > 0 {
 		rc.writeTimeout = o.WriteTimeout()
+	}
+	if o.DialTimeout() > 0 {
+		rc.dialTimeout = o.DialTimeout()
 	}
 
 	return rc
@@ -1007,7 +899,37 @@ func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err
 		return cc, nil
 	}
 	if !createConn {
+		if c.MaxConnWaitTimeout <= 0 {
+			return nil, errs.ErrNoFreeConns
+		}
 
+		timeout := c.MaxConnWaitTimeout
+
+		// 等待空闲连接
+		tc := timer.AcquireTimer(timeout)
+		defer timer.ReleaseTimer(tc)
+
+		w := &wantConn{
+			ready: make(chan struct{}, 1),
+		}
+		defer func() {
+			if err != nil {
+				w.cancel(c, err)
+			}
+		}()
+
+		// 注意：在设置 MaxConnWaitTimeout 的情况下，
+		// 如果连接池中的连接数超过了最大连接数，并且
+		// 需要在等待时建立连接，则使用 HostClient 的拨号超时，
+		// 而不是请求选项中的拨号超时。
+		c.queueForIdle(w)
+
+		select {
+		case <-w.ready:
+			return w.conn, w.err
+		case <-tc.C:
+			return nil, errs.ErrNoFreeConns
+		}
 	}
 
 	if startCleaner {
@@ -1104,6 +1026,16 @@ func (c *HostClient) acquireReader(conn network.Conn) network.Reader {
 	return conn
 }
 
+func (c *HostClient) queueForIdle(w *wantConn) {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+	if c.connsWait == nil {
+		c.connsWait = &wantConnQueue{}
+	}
+	c.connsWait.clearFront()
+	c.connsWait.pushBack(w)
+}
+
 func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 	if c == nil {
 		c = &tls.Config{}
@@ -1138,7 +1070,6 @@ func tlsServerName(addr string) string {
 	return host
 }
 
-// 将 conn 包装为客户端连接池实例的内部链接
 func acquireClientConn(conn network.Conn) *clientConn {
 	v := clientConnPool.Get()
 	if v == nil {
@@ -1154,4 +1085,149 @@ func releaseClientConn(cc *clientConn) {
 	// 重设所有字段。
 	*cc = clientConn{}
 	clientConnPool.Put(cc)
+}
+
+type clientConn struct {
+	c network.Conn
+
+	createdTime time.Time
+	lastUseTime time.Time
+}
+
+type wantConn struct {
+	ready chan struct{}
+	mu    sync.Mutex // 保护 conn, err, close(ready)
+	conn  *clientConn
+	err   error
+}
+
+// 尝试传递 conn, err 给当前 w，并汇报是否成功。
+func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil {
+		return false
+	}
+	w.conn = conn
+	w.err = err
+	if w.conn == nil && w.err == nil {
+		panic("wind: 内部错误: 滥用 tryDeliver")
+	}
+	close(w.ready)
+	return true
+}
+
+// 返回该等待连接是否还在等待答案（连接或错误）
+func (w *wantConn) waiting() bool {
+	select {
+	case <-w.ready:
+		return false
+	default:
+		return true
+	}
+}
+
+// 标记 w 不在等待结果（如：取消了）
+// 如果连接已被传递，则调用 HostClient.releaseConn 进行释放。
+func (w *wantConn) close(c *HostClient, err error) {
+	w.mu.Lock()
+	if w.conn == nil && w.err == nil {
+		close(w.ready) // 在未来传递中发现不当行为
+	}
+
+	conn := w.conn
+	w.conn = nil
+	w.err = err
+	w.mu.Unlock()
+
+	if conn != nil {
+		c.releaseConn(conn)
+	}
+}
+
+// cancel 标记 w 不在等待结果（例如，由于取消）。
+// 如果已经交付了连接，cancel 会将其与 c.releaseConn 一起返回。
+func (w *wantConn) cancel(c *HostClient, err error) {
+	w.mu.Lock()
+	if w.conn == nil && w.err == nil {
+		close(w.ready) // 在未来交付中发现不当行为
+	}
+
+	conn := w.conn
+	w.conn = nil
+	w.err = err
+	w.mu.Unlock()
+
+	if conn != nil {
+		c.releaseConn(conn)
+	}
+}
+
+// 是一个 wantConn 队列。
+//
+// 灵感来自 net/http/transport.go
+type wantConnQueue struct {
+	// This is a queue, not a deque.
+	// It is split into two stages - head[headPos:] and tail.
+	// popFront is trivial (headPos++) on the first stage, and
+	// pushBack is trivial (append) on the second stage.
+	// If the first stage is empty, popFront can swap the
+	// first and second stages to remedy the situation.
+	//
+	// This two-stage split is analogous to the use of two lists
+	// in Okasaki's purely functional queue but without the
+	// overhead of reversing the list when swapping stages.
+	head    []*wantConn
+	headPos int
+	tail    []*wantConn
+}
+
+// 返回队列中的连接数。
+func (q *wantConnQueue) len() int {
+	return len(q.head) - q.headPos + len(q.tail)
+}
+
+// 返回队首的等待连接但不删除它。
+func (q *wantConnQueue) peekFront() *wantConn {
+	if q.headPos < len(q.head) {
+		return q.head[q.headPos]
+	}
+	if len(q.tail) > 0 {
+		return q.tail[0]
+	}
+	return nil
+}
+
+// 移除并返回队首的等待连接。
+func (q *wantConnQueue) popFront() *wantConn {
+	if q.headPos >= len(q.head) {
+		if len(q.tail) == 0 {
+			return nil
+		}
+		// 把尾巴当做新的头，并清掉尾巴。
+		q.head, q.headPos, q.tail = q.tail, 0, q.head[:0]
+	}
+
+	w := q.head[q.headPos]
+	q.head[q.headPos] = nil
+	q.headPos++
+	return w
+}
+
+// 添加 w 至队列尾部。
+func (q *wantConnQueue) pushBack(w *wantConn) {
+	q.tail = append(q.tail, w)
+}
+
+// 清掉队首不再等待的连接，并返回其是否已被弹出。
+func (q *wantConnQueue) clearFront() (cleaned bool) {
+	for {
+		w := q.peekFront()
+		if w == nil || w.waiting() {
+			return cleaned
+		}
+		q.popFront()
+		cleaned = true
+	}
 }

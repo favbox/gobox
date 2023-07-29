@@ -421,7 +421,7 @@ func tryReadTrailer(t *protocol.Trailer, r network.Reader, n int) error {
 	if len(b) == 0 {
 		// 若超时则返回 ErrTimeout
 		if err != nil && strings.Contains(err.Error(), "timeout") {
-			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "读取响应标头")
+			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "读取响应头")
 		}
 
 		if n == 1 || err == io.EOF {
@@ -481,7 +481,7 @@ func trySkipTrailer(r network.Reader, n int) error {
 	if len(b) == 0 {
 		// Return ErrTimeout on any timeout.
 		if err != nil && strings.Contains(err.Error(), "timeout") {
-			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "read response header")
+			return errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "读取响应头")
 		}
 
 		if n == 1 || err == io.EOF {
