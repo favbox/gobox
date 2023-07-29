@@ -66,7 +66,7 @@ type ClientOptions struct {
 	// 是否对主机连接使用 TLS（也叫 SSL 或 HTTPS），可选。
 	TLSConfig *tls.Config
 
-	// 是否启用响应的主体流
+	// 是否启用响应的正文流
 	ResponseBodyStream bool
 
 	// 客户端名称。用于 User-Agent 请求标头。

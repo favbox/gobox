@@ -2,7 +2,10 @@ package http1
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -20,7 +23,10 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network/dialer"
 	"github.com/favbox/gosky/wind/pkg/protocol"
 	"github.com/favbox/gosky/wind/pkg/protocol/client"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 	"github.com/favbox/gosky/wind/pkg/protocol/http1/proxy"
+	reqI "github.com/favbox/gosky/wind/pkg/protocol/http1/req"
+	respI "github.com/favbox/gosky/wind/pkg/protocol/http1/resp"
 )
 
 var (
@@ -221,7 +227,7 @@ type ClientOptions struct {
 	// 默认不等待，立即返回 ErrNoFreeConns。
 	MaxConnWaitTimeout time.Duration
 
-	// 是否启用响应的主体流
+	// 是否启用响应的正文流
 	ResponseBodyStream bool
 
 	// 与重试相关的所有配置
@@ -288,7 +294,7 @@ func (c *HostClient) Close() error {
 	return nil
 }
 
-// CloseIdleConnections 关闭所有之前请求建立而当前空闲却保持 "keep-alive" 状态的连接。
+// CloseIdleConnections 关闭所有之前请求建立而当前空闲而保持 "keep-alive" 状态的连接。
 // 不会中断当前正在使用的连接。
 func (c *HostClient) CloseIdleConnections() {
 	c.connsLock.Lock()
@@ -308,6 +314,252 @@ func (c *HostClient) closeConn(cc *clientConn) {
 	c.decConnsCount()
 	cc.c.Close()
 	releaseClientConn(cc)
+}
+
+func (c *HostClient) ConnectionCount() (count int) {
+	c.connsLock.Lock()
+	count = len(c.conns)
+	c.connsLock.Unlock()
+	return
+}
+
+func (c *HostClient) ConnPoolState() config.ConnPoolState {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+	cps := config.ConnPoolState{
+		PoolConnNum:  len(c.conns),
+		TotalConnNum: c.connsCount,
+		Add:          c.Addr,
+	}
+
+	if c.connsWait != nil {
+		cps.WaitConnNum = c.connsWait.len()
+	}
+
+	return cps
+}
+
+// Do 执行给定的 http 请求 req 并设置相应的 resp。
+//
+// Request 至少包含带有完整网址（包括 schema 和 主机）的非空 RequestURI，或 非空 Host 头 + RequestURI。
+//
+// 该函数不遵循重定向。使用 Get* 用于遵循重定向。
+//
+// 若 resp 为空，则忽略 Response 处理。
+//
+// ErrNoFreeConns 将在到主机的所有 HostClient.MaxConns 连接都繁忙时返回。
+//
+// 推荐获取 req 和 resp 的方式为 AcquireRequest 和 AcquireResponse，在性能关键代码中可提升性能。
+func (c *HostClient) Do(ctx context.Context, req *protocol.Request, resp *protocol.Response) error {
+	var (
+		err                error
+		canIdempotentRetry bool               // 能否幂等重试
+		isDefaultRetryFunc                    = true
+		attempts           uint               = 0
+		maxAttempts        uint               = 1
+		isRequestRetryable client.RetryIfFunc = client.DefaultRetryIf
+	)
+	retryCfg := c.ClientOptions.RetryConfig
+	if retryCfg != nil {
+		maxAttempts = retryCfg.MaxAttemptTimes
+	}
+
+	if c.ClientOptions.RetryIfFunc != nil {
+		isRequestRetryable = c.ClientOptions.RetryIfFunc
+		// 若用户提供了自定义重试函数，则 canIdempotentRetry 不再有意义。
+		// 用户将通过自定义重试函数完全控制重试逻辑。
+		isDefaultRetryFunc = false
+	}
+
+	atomic.AddInt32(&c.pendingRequests, 1)
+	req.Options().StartRequest()
+	for {
+		canIdempotentRetry, err = c.do(req, resp)
+		// 若无自定义重试且 err == nil，则循环将直接退出。
+		if err == nil && isDefaultRetryFunc {
+			break
+		}
+
+		if isDefaultRetryFunc {
+			// canIdempotentRetry 仅在用户未提供自定义重试函数时有效
+			if !canIdempotentRetry {
+				break
+			}
+		}
+
+		attempts++
+		if attempts >= maxAttempts {
+			break
+		}
+
+		// 检查是否应重试此请求
+		if !isRequestRetryable(req, resp, err) {
+			break
+		}
+
+		wait := retry.Delay(attempts, err, retryCfg)
+		// 等待 wait 时间后重试
+		time.Sleep(wait)
+	}
+	atomic.AddInt32(&c.pendingRequests, -1)
+
+	if err == io.EOF {
+		err = errConnectionClosed
+	}
+	return err
+}
+
+// DoDeadline 执行给定的 http 请求 req 并等待响应直至到达截止时间。
+//
+// Request 至少包含带有完整网址（包括 schema 和 主机）的非空 RequestURI，或 非空 Host 头 + RequestURI。
+//
+// 该函数不遵循重定向。使用 Get* 用于遵循重定向。
+//
+// 若 resp 为空，则忽略 Response 处理。
+//
+// errTimeout 将在截止时间到达后被返回。
+//
+// ErrNoFreeConns 将在到主机的所有 HostClient.MaxConns 连接都繁忙时返回。
+//
+// 推荐获取 req 和 resp 的方式为 AcquireRequest 和 AcquireResponse，在性能关键代码中可提升性能。
+func (c *HostClient) DoDeadline(ctx context.Context, req *protocol.Request, resp *protocol.Response, deadline time.Time) error {
+	// 设置请求的超时时长，然后还是用上面的 Do 方法执行。
+	return client.DoDeadline(ctx, req, resp, deadline, c)
+}
+
+// DoTimeout 执行给定的 http 请求 req 并在给定的超时时间内等待响应。
+//
+// Request 至少包含带有完整网址（包括 schema 和 主机）的非空 RequestURI，或 非空 Host 头 + RequestURI。
+//
+// 该函数不遵循重定向。使用 Get* 用于遵循重定向。
+//
+// 若 resp 为空，则忽略 Response 处理。
+//
+// errTimeout 将在截止时间到达后被返回。
+//
+// ErrNoFreeConns 将在到主机的所有 HostClient.MaxConns 连接都繁忙时返回。
+//
+// 推荐获取 req 和 resp 的方式为 AcquireRequest 和 AcquireResponse，在性能关键代码中可提升性能。
+//
+// 警告：DoTimeout 不会中止请求自身，即请求将在后台继续执行，响应将被丢弃。
+// 如果请求时间过长，并且连接池已满，请尝试设置 ReadTimeout。
+func (c *HostClient) DoTimeout(ctx context.Context, req *protocol.Request, resp *protocol.Response, timeout time.Duration) error {
+	return client.DoTimeout(ctx, req, resp, timeout, c)
+}
+
+// DoRedirects 执行给定的 http 请求 req 并设置相应的 resp，
+// 遵循 maxRedirectsCount 次重定向。当触达最大重定向次数，返回 ErrTooManyRedirects。
+//
+// Request 至少包含带有完整网址（包括 schema 和 主机）的非空 RequestURI，或 非空 Host 头 + RequestURI。
+//
+// 客户端确定要请求的服务器遵循如下顺序：
+//
+//   - 首先，尝试使用 RequestURI，前提是 req 包含带有 schema 和 host 的完整网址；
+//   - 否则，使用主机 header。
+//
+// 若 resp 为空，则忽略 Response 处理。
+//
+// ErrNoFreeConns 将在到主机的所有 HostClient.MaxConns 连接都繁忙时返回。
+//
+// 推荐获取 req 和 resp 的方式为 AcquireRequest 和 AcquireResponse，在性能关键代码中可提升性能。
+func (c *HostClient) DoRedirects(ctx context.Context, req *protocol.Request, resp *protocol.Response, maxRedirectsCount int) error {
+	_, _, err := client.DoRequestFollowRedirects(ctx, req, resp, req.URI().String(), maxRedirectsCount, c)
+	return err
+}
+
+// Get 返回给定 url 的状态码和响应体。
+//
+// dst 的内容将被响应体替换并返回，若 dst 过小将分配一个新切片。
+//
+// 该函数遵循重定向。使用 Do* 可手动处理重定向。
+func (c *HostClient) Get(ctx context.Context, dst []byte, url string) (statusCode int, body []byte, err error) {
+	return client.GetURL(ctx, dst, url, c)
+}
+
+// GetDeadline 返回给定 url 的状态码和响应体。
+//
+// dst 的内容将被响应体替换并返回，若 dst 过小将分配一个新切片。
+//
+// 该函数遵循重定向。使用 Do* 可手动处理重定向。
+//
+// errTimeout 将在截止时间到达后被返回。
+func (c *HostClient) GetDeadline(ctx context.Context, dst []byte, url string, deadline time.Time) (statusCode int, body []byte, err error) {
+	return client.GetURLDeadline(ctx, dst, url, deadline, c)
+}
+
+// GetURLTimeout 返回给定 url 的状态码和响应体。
+//
+// dst 的内容将被响应体替换并返回，若 dst 过小将分配一个新切片。
+//
+// 该函数遵循重定向。使用 Do* 可手动处理重定向。
+//
+// errTimeout 将在触达超时时长后被返回。
+func (c *HostClient) GetURLTimeout(ctx context.Context, dst []byte, url string, timeout time.Duration) (statusCode int, body []byte, err error) {
+	return client.GetURLTimeout(ctx, dst, url, timeout, c)
+}
+
+// Post 发送给定参数的 POST 请求至给定的 url。
+//
+// dst 的内容将被响应体替换并返回，若 dst 过小将分配一个新切片。
+//
+// 该函数遵循重定向。使用 Do* 可手动处理重定向。
+//
+// 若 postArgs 为空，则发送空 POST 正文。
+func (c *HostClient) Post(ctx context.Context, dst []byte, url string, postArgs *protocol.Args) (statusCode int, body []byte, err error) {
+	return client.PostURL(ctx, dst, url, postArgs, c)
+}
+
+// LastUseTime 返回客户端上次使用的时间。
+func (c *HostClient) LastUseTime() time.Time {
+	n := atomic.LoadUint32(&c.lastUseTime)
+	return time.Unix(startTimeUnix+int64(n), 0)
+}
+
+// PendingRequests 返回客户端正在执行的当前请求数。
+//
+// 该函数可用于平衡多个 HostClient 之间的负载。
+func (c *HostClient) PendingRequests() int {
+	return int(atomic.LoadInt32(&c.pendingRequests))
+}
+
+func (c *HostClient) SetDynamicConfig(dc *client.DynamicConfig) {
+	c.Addr = dc.Addr
+	c.ProxyURI = dc.ProxyURI
+	c.IsTLS = dc.IsTLS
+
+	// 设置 addr 后开始观察，以避免数据竞争
+	if c.StateObserve != nil {
+		go func() {
+			t := time.NewTicker(c.ObservationInterval)
+			for {
+				select {
+				case <-c.closed:
+					return
+				case <-t.C:
+					c.StateObserve(c)
+				}
+			}
+		}()
+	}
+}
+
+// SetMaxConns 设置可以建立到 Addr 中列出的所有主机的最大连接数。
+func (c *HostClient) SetMaxConns(newMaxConns int) {
+	c.connsLock.Lock()
+	c.MaxConns = newMaxConns
+	c.connsLock.Unlock()
+}
+
+// ShouldRemove 若连接数为 0，则可移除。
+func (c *HostClient) ShouldRemove() bool {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+	return c.connsCount == 0
+}
+
+// WantConnectionCount 返回等待状态的连接数。
+func (c *HostClient) WantConnectionCount() (count int) {
+	return c.connsWait.len()
 }
 
 func (c *HostClient) decConnsCount() {
@@ -436,7 +688,12 @@ func dialAddr(addr string, dial network.Dialer, dialDualStack bool, tlsConfig *t
 		conn, err = proxy.SetupProxy(conn, addr, proxyURI, tlsConfig, isTLS, dial)
 	}
 
-	// TODO 待完善
+	// conn 获取失败时必须为空，故无需关闭
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
 
 func (c *HostClient) nextAddr() string {
@@ -481,6 +738,372 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
+func (c *HostClient) do(req *protocol.Request, resp *protocol.Response) (bool, error) {
+	nilResp := false
+	if resp == nil {
+		nilResp = true
+		resp = protocol.AcquireResponse()
+	}
+
+	canIdempotentRetry, err := c.doNonNilReqResp(req, resp)
+
+	if nilResp {
+		protocol.ReleaseResponse(resp)
+	}
+
+	return canIdempotentRetry, err
+}
+
+func (c *HostClient) doNonNilReqResp(req *protocol.Request, resp *protocol.Response) (bool, error) {
+	if req == nil {
+		panic("BUG: req 不能为空")
+	}
+	if resp == nil {
+		panic("BUG: resp 不能为空")
+	}
+
+	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
+
+	rc := c.preHandleConfig(req.Options())
+
+	// 先释放请求占用的资源，再发送请求，以便 GC 回收（如响应体）。
+	// 在明确设置 SkipBody 的情况下，要备份起来。
+	customSkipBody := resp.SkipBody
+	resp.Reset()
+	resp.SkipBody = customSkipBody
+
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
+	reqTimeout := req.Options().RequestTimeout()
+	begin := req.Options().StartTime()
+
+	dialTimeout := rc.dialTimeout
+	if reqTimeout < dialTimeout || dialTimeout == 0 {
+		dialTimeout = reqTimeout
+	}
+	cc, err := c.acquireConn(dialTimeout)
+	// 若获取连接出错，立即返回错误
+	if err != nil {
+		return false, err
+	}
+	conn := cc.c
+
+	usingProxy := false
+	if c.ProxyURI != nil && bytes.Equal(req.Scheme(), bytestr.StrHTTP) {
+		usingProxy = true
+		proxy.SetProxyAuthHeader(&req.Header, c.ProxyURI)
+	}
+
+	resp.ParseNetAddr(conn)
+
+	shouldClose, timeout := updateReqTimeout(reqTimeout, rc.writeTimeout, begin)
+	if shouldClose {
+		c.closeConn(cc)
+		return false, errTimeout
+	}
+
+	if err = conn.SetWriteTimeout(timeout); err != nil {
+		c.closeConn(cc)
+		// 尝试其他连接，若重试启用的话。
+		return true, err
+	}
+
+	resetConnection := false
+	if c.MaxConnDuration > 0 && time.Since(cc.createdTime) > c.MaxConnDuration && !req.ConnectionClose() {
+		req.SetConnectionClose()
+		resetConnection = true
+	}
+
+	userAgentOld := req.Header.UserAgent()
+	if len(userAgentOld) == 0 {
+		req.Header.SetUserAgentBytes(c.getClientName())
+	}
+	zw := c.acquireWriter(conn)
+
+	if !usingProxy {
+		err = reqI.Write(req, zw)
+	} else {
+		err = reqI.ProxyWrite(req, zw)
+	}
+	if resetConnection {
+		req.Header.ResetConnectionClose()
+	}
+
+	if err == nil {
+		err = zw.Flush()
+	}
+	// 错误发生于写入请求时，关闭连接，重试其他连接（若启用重试）
+	if err != nil {
+		defer c.closeConn(cc)
+
+		errNorm, ok := conn.(network.ErrorNormalization)
+		if ok {
+			err = errNorm.ToWindError(err)
+		}
+
+		if !errors.Is(err, errs.ErrConnectionClosed) {
+			return true, err
+		}
+
+		// 设置保护时间，以免无限循环
+		if conn.SetReadTimeout(time.Second) != nil {
+			return true, err
+		}
+
+		// 仅限于连接被关闭于写入请求时。尝试解析响应并返回。
+		// 此情况下，请求/响应被认为是成功的。
+		// 否则，返回先前的错误。
+
+		zr := c.acquireReader(conn)
+		defer zr.Release()
+		if respI.ReadHeaderAndLimitBody(resp, zr, c.MaxResponseBodySize) == nil {
+			return false, nil
+		}
+
+		return true, err
+	}
+
+	shouldClose, timeout = updateReqTimeout(reqTimeout, rc.readTimeout, begin)
+	if shouldClose {
+		c.closeConn(cc)
+		return false, errTimeout
+	}
+
+	// 每次都要设置截止时间，因为 golang 已修复了这个性能问题
+	// 详见 https://github.com/golang/go/issues/15133#issuecomment-271571395
+	if err = conn.SetReadTimeout(timeout); err != nil {
+		c.closeConn(cc)
+		// 重试其他连接（若启用重试）
+		return true, err
+	}
+
+	if customSkipBody || req.Header.IsHead() || req.Header.IsConnect() {
+		resp.SkipBody = true
+	}
+	if c.DisableHeaderNamesNormalizing {
+		resp.Header.DisableNormalizing()
+	}
+	zr := c.acquireReader(conn)
+
+	// 此处初始化时用于在 ReadBodyStream 的闭包中传递，
+	// 且该值降载读取响应头后被指派
+	//
+	// 这是为了解决 Response 响应和 BodyStream 正文流相互依赖的问题。
+	shouldCloseConn := false
+
+	if !c.ResponseBodyStream {
+		err = respI.ReadHeaderAndLimitBody(resp, zr, c.MaxResponseBodySize)
+	} else {
+		err = respI.ReadBodyStream(resp, zr, c.MaxResponseBodySize, func(shouldClose bool) error {
+			if shouldCloseConn || shouldClose {
+				c.closeConn(cc)
+			} else {
+				c.releaseConn(cc)
+			}
+			return nil
+		})
+	}
+
+	if err != nil {
+		zr.Release()
+		c.closeConn(cc)
+		// ErrBodyTooLarge 时不要重试，因为再试还一样。
+		isRetry := !errors.Is(err, errs.ErrBodyTooLarge)
+		return isRetry, err
+	}
+
+	zr.Release()
+
+	shouldCloseConn = resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+
+	if c.ResponseBodyStream {
+		return false, err
+	}
+
+	if shouldCloseConn {
+		c.closeConn(cc)
+	} else {
+		c.releaseConn(cc)
+	}
+
+	return false, err
+}
+
+func updateReqTimeout(reqTimeout, compareTimeout time.Duration, before time.Time) (shouldCloseConn bool, timeout time.Duration) {
+	if reqTimeout <= 0 {
+		return false, compareTimeout
+	}
+	left := reqTimeout - time.Since(before)
+	if left <= 0 {
+		return true, 0
+	}
+
+	if compareTimeout <= 0 {
+		return false, left
+	}
+
+	if left < compareTimeout {
+		return false, compareTimeout
+	}
+
+	return false, left
+}
+
+type requestConfig struct {
+	dialTimeout  time.Duration
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+}
+
+func (c *HostClient) preHandleConfig(o *config.RequestOptions) requestConfig {
+	rc := requestConfig{
+		dialTimeout:  c.DialTimeout,
+		readTimeout:  c.ReadTimeout,
+		writeTimeout: c.WriteTimeout,
+	}
+	if o.DialTimeout() > 0 {
+		rc.dialTimeout = o.DialTimeout()
+	}
+	if o.ReadTimeout() > 0 {
+		rc.readTimeout = o.ReadTimeout()
+	}
+	if o.WriteTimeout() > 0 {
+		rc.writeTimeout = o.WriteTimeout()
+	}
+
+	return rc
+}
+
+func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err error) {
+	createConn := false
+	startCleaner := false
+
+	var n int
+	c.connsLock.Lock()
+	n = len(c.conns)
+	if n == 0 {
+		maxConns := c.MaxConns
+		if maxConns <= 0 {
+			maxConns = consts.DefaultMaxConnsPerHost
+		}
+		if c.connsCount < maxConns {
+			c.connsCount++
+			createConn = true
+			if !c.connsCleanerRun {
+				startCleaner = true
+				c.connsCleanerRun = true
+			}
+		}
+	} else {
+		n--
+		cc = c.conns[n]
+		c.conns[n] = nil
+		c.conns = c.conns[:n]
+	}
+	c.connsLock.Unlock()
+
+	if cc != nil {
+		return cc, nil
+	}
+	if !createConn {
+
+	}
+
+	if startCleaner {
+		go c.connsCleaner()
+	}
+
+	conn, err := c.dialHostHard(dialTimeout)
+	if err != nil {
+		c.decConnsCount()
+		return nil, err
+	}
+	cc = acquireClientConn(conn)
+
+	return cc, nil
+}
+
+func (c *HostClient) connsCleaner() {
+	var (
+		scratch             []*clientConn
+		maxIdleConnDuration = c.MaxIdleConnDuration
+	)
+	if maxIdleConnDuration <= 0 {
+		maxIdleConnDuration = consts.DefaultMaxIdleConnDuration
+	}
+	for {
+		currentTime := time.Now()
+
+		// 确定要关闭的空闲连接。
+		c.connsLock.Lock()
+		conns := c.conns
+		n := len(conns)
+		i := 0
+
+		for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
+			i++
+		}
+		sleepFor := maxIdleConnDuration
+		if i < n {
+			// +1 以便超过过期时间
+			// 否则上面的 > 检查仍会失败。
+			sleepFor = maxIdleConnDuration - currentTime.Sub(conns[i].lastUseTime) + 1
+		}
+		scratch = append(scratch[:0], conns[:i]...)
+		if i > 0 {
+			m := copy(conns, conns[i:])
+			for i = m; i < n; i++ {
+				conns[i] = nil
+			}
+			c.conns = conns[:m]
+		}
+		c.connsLock.Unlock()
+
+		// 关闭空闲连接。
+		for i, cc := range scratch {
+			c.closeConn(cc)
+			scratch[i] = nil
+		}
+
+		// 确定是否要停止 connsCleaner
+		c.connsLock.Lock()
+		mustStop := c.connsCount == 0
+		if mustStop {
+			c.connsCleanerRun = false
+		}
+		c.connsLock.Unlock()
+		if mustStop {
+			break
+		}
+
+		time.Sleep(sleepFor)
+	}
+}
+
+func (c *HostClient) getClientName() []byte {
+	v := c.clientName.Load()
+	var clientName []byte
+	if v == nil {
+		clientName = []byte(c.Name)
+		if len(clientName) == 0 && !c.NoDefaultUserAgentHeader {
+			clientName = bytestr.DefaultUserAgent
+		}
+		c.clientName.Store(clientName)
+	} else {
+		clientName = v.([]byte)
+	}
+	return clientName
+}
+
+func (c *HostClient) acquireWriter(conn network.Conn) network.Writer {
+	return conn
+}
+
+func (c *HostClient) acquireReader(conn network.Conn) network.Reader {
+	return conn
+}
+
 func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 	if c == nil {
 		c = &tls.Config{}
@@ -515,6 +1138,7 @@ func tlsServerName(addr string) string {
 	return host
 }
 
+// 将 conn 包装为客户端连接池实例的内部链接
 func acquireClientConn(conn network.Conn) *clientConn {
 	v := clientConnPool.Get()
 	if v == nil {

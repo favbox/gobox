@@ -146,7 +146,7 @@ func (resp *Response) BodyGunzip() ([]byte, error) {
 	return gunzipData(resp.Body())
 }
 
-// BodyStream 返回响应的主体流。
+// BodyStream 返回响应的正文流。
 func (resp *Response) BodyStream() io.Reader {
 	return resp.bodyStream
 }
@@ -207,7 +207,7 @@ func (resp *Response) ConstructBodyStream(body *bytebufferpool.ByteBuffer, bodyS
 	resp.bodyStream = bodyStream
 }
 
-// CopyTo 拷贝主体流之外的响应信息到 dst。
+// CopyTo 拷贝正文流之外的响应信息到 dst。
 func (resp *Response) CopyTo(dst *Response) {
 	resp.CopyToSkipBody(dst)
 	if resp.bodyRaw != nil {
@@ -332,7 +332,7 @@ func (resp *Response) SetBodyRaw(body []byte) {
 	resp.bodyRaw = body
 }
 
-// SetBodyStream 设置响应的主体流和大小（可选）。
+// SetBodyStream 设置响应的正文流和大小（可选）。
 //
 // 若 bodySize >= 0，那么在返回 io.EOF 之前，bodyStream 必须提供确切的 bodySize 字节。
 //

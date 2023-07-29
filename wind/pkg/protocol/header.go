@@ -1524,7 +1524,7 @@ func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie(), ArgsHasValue)
 }
 
-// SetHeaderLength 设置跟踪程序 tracer 的标头大小。
+// SetHeaderLength 设置响应头的大小，用于 tracer。
 func (h *ResponseHeader) SetHeaderLength(length int) {
 	h.headerLength = length
 }

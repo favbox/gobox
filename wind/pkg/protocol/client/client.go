@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 
@@ -50,6 +51,40 @@ type clientURLResponse struct {
 	statusCode int
 	body       []byte
 	err        error
+}
+
+// DefaultRetryIf 默认重试条件，主要用于幂等请求。
+// 若不能满足条件，则可以实现自己的重试条件。
+func DefaultRetryIf(req *protocol.Request, resp *protocol.Response, err error) bool {
+	//如果请求正文不可回放，则无法重试
+	if req.IsBodyStream() {
+		return false
+	}
+
+	// 是否为幂等请求
+	if isIdempotent(req, resp, err) {
+		return true
+	}
+
+	// 若服务器在发送相应之前关闭了连接，请重试非幂等请求。
+	//
+	// 若服务器在超时关闭空闲的保活连接时，则可能出现这种情况。
+	//
+	// Apache 和 Nginx 通常会这样做。
+	if err == io.EOF {
+		return true
+	}
+
+	return false
+}
+
+func isIdempotent(req *protocol.Request, resp *protocol.Response, err error) bool {
+	return req.Header.IsGet() ||
+		req.Header.IsHead() ||
+		req.Header.IsPut() ||
+		req.Header.IsDelete() ||
+		req.Header.IsOptions() ||
+		req.Header.IsTrace()
 }
 
 func GetURL(ctx context.Context, dst []byte, url string, c Doer, requestOptions ...config.RequestOption) (statusCode int, body []byte, err error) {
@@ -178,7 +213,7 @@ func DoDeadline(ctx context.Context, req *protocol.Request, resp *protocol.Respo
 		return errTimeout
 	}
 	// 注意：它将覆盖 reqTimeout。
-	req.SetOptions(config.WithReadTimeout(timeout))
+	req.SetOptions(config.WithRequestTimeout(timeout))
 	return c.Do(ctx, req, resp)
 }
 
@@ -198,7 +233,7 @@ func doRequestFollowRedirectsBuffer(ctx context.Context, req *protocol.Request, 
 
 	statusCode, _, err = DoRequestFollowRedirects(ctx, req, resp, url, defaultMaxRedirectsCount, c)
 
-	// 在 HTTP2 中，客户端使用流模式创建请求，其主体位于主体流中。
+	// 在 HTTP2 中，客户端使用流模式创建请求，其主体位于正文流中。
 	// 在 HTTP1 中，只有客户端接收的主体大小超过了最大主体尺寸，且客户端处于流模式才能触发。
 	body = resp.Body()
 	bodyBuf.B = oldBody

@@ -4,8 +4,8 @@ package bytestr
 import "github.com/favbox/gosky/wind/pkg/protocol/consts"
 
 var (
-	DefaultServerName  = []byte("wind")
-	DefaultUserAgent   = []byte("wind")
+	DefaultServerName  = []byte("Wind")
+	DefaultUserAgent   = []byte("Wind")
 	DefaultContentType = []byte("text/plain; charset=utf-8")
 )
 

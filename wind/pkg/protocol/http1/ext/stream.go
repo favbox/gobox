@@ -58,6 +58,8 @@ func (bs *bodyStream) Read(p []byte) (int, error) {
 				}
 				return 0, err
 			}
+
+			bs.chunkLeft = chunkSize
 		}
 		bytesToRead := len(p)
 
@@ -264,7 +266,7 @@ func ReadBodyWithStreaming(zr network.Reader, contentLength, maxBodySize int, ds
 	return b, nil
 }
 
-// AcquireBodyStream 从正文流的池中获取一个实例。
+// AcquireBodyStream 从正文流的池中获取一个指定信息的实例。
 func AcquireBodyStream(b *bytebufferpool.ByteBuffer, r network.Reader, t *protocol.Trailer, contentLength int) io.Reader {
 	bs := bodyStreamPool.Get().(*bodyStream)
 	bs.prefetchedBytes = bytes.NewReader(b.B)

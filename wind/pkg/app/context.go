@@ -74,7 +74,7 @@ func (ctx *RequestContext) AbortWithMsg(msg string, statusCode int) {
 	ctx.Abort()
 }
 
-// File 快速写入指定文件到响应的主体流。
+// File 快速写入指定文件到响应的正文流。
 func (ctx *RequestContext) File(filepath string) {
 	ServeFile(ctx, filepath)
 }
@@ -104,7 +104,7 @@ func (ctx *RequestContext) SetContentTypeBytes(contentType []byte) {
 	ctx.Response.Header.SetContentTypeBytes(contentType)
 }
 
-// SetBodyStream 设置响应的主体流和大小（可选）。
+// SetBodyStream 设置响应的正文流和大小（可选）。
 func (ctx *RequestContext) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	ctx.Response.SetBodyStream(bodyStream, bodySize)
 }
