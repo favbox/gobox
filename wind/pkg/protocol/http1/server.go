@@ -54,7 +54,7 @@ type Option struct {
 	ReadTimeout                  time.Duration
 	ServerName                   []byte
 	TLS                          *tls.Config
-	EnableTrace                  bool
+	EnableTrace                  bool // 启用链路追踪
 	ContinueHandler              func(header *protocol.RequestHeader) bool
 	HijackConnHandle             func(c network.Conn, h app.HijackHandler)
 }

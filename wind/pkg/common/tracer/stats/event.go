@@ -58,17 +58,18 @@ const (
 
 // 预定义的事件。
 var (
-	HTTPStart  = newEvent(httpStart, LevelBase)
-	HTTPFinish = newEvent(httpFinish, LevelBase)
+	HTTPStart = newEvent(httpStart, LevelBase)
 
-	ServerHandleStart  = newEvent(serverHandleStart, LevelDetailed)  // 处理开始
-	ServerHandleFinish = newEvent(serverHandleFinish, LevelDetailed) // 处理结束
 	ReadHeaderStart    = newEvent(readHeaderStart, LevelDetailed)    // 标头读取开始
 	ReadHeaderFinish   = newEvent(readHeaderFinish, LevelDetailed)   // 标头读取结束
 	ReadBodyStart      = newEvent(readBodyStart, LevelDetailed)      // 正文读取开始
 	ReadBodyFinish     = newEvent(readBodyFinish, LevelDetailed)     // 正文读取结束
+	ServerHandleStart  = newEvent(serverHandleStart, LevelDetailed)  // 处理开始
+	ServerHandleFinish = newEvent(serverHandleFinish, LevelDetailed) // 处理结束
 	WriteStart         = newEvent(writeStart, LevelDetailed)         // 写入开始
 	WriteFinish        = newEvent(writeFinish, LevelDetailed)        // 写入结束
+
+	HTTPFinish = newEvent(httpFinish, LevelBase)
 )
 
 // 错误

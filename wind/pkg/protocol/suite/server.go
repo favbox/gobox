@@ -9,7 +9,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/protocol"
 )
 
-// Core 是承诺为协议层扩展提供的核心接口。
+// Core 是承诺为协议层提供扩展的核心接口。
 type Core interface {
 	// IsRunning 检查引擎是否在运行。
 	IsRunning() bool

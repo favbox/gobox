@@ -163,6 +163,7 @@ func (m *Conn) AddCloseCallback(callback netpoll.CloseCallback) error {
 	panic("待实现")
 }
 
+// NewConn 创建指定原始请求字符串的连接。
 func NewConn(source string) *Conn {
 	zr := netpoll.NewReader(strings.NewReader(source))
 	zw := netpoll.NewReadWriter(&bytes.Buffer{})
