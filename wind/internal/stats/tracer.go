@@ -45,6 +45,7 @@ func (ctl *Controller) DoFinish(ctx context.Context, c *app.RequestContext, err 
 	}
 }
 
+// HasTracer 是否有跟踪器？
 func (ctl *Controller) HasTracer() bool {
 	return ctl != nil && len(ctl.tracers) > 0
 }

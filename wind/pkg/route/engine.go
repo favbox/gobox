@@ -17,6 +17,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/network"
 	"github.com/favbox/gosky/wind/pkg/network/standard"
 	"github.com/favbox/gosky/wind/pkg/protocol"
+	"github.com/favbox/gosky/wind/pkg/protocol/suite"
 )
 
 const unknownTransporterName = "unknown"

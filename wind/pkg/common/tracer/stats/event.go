@@ -61,14 +61,14 @@ var (
 	HTTPStart  = newEvent(httpStart, LevelBase)
 	HTTPFinish = newEvent(httpFinish, LevelBase)
 
-	ServerHandleStart  = newEvent(serverHandleStart, LevelDetailed)
-	ServerHandleFinish = newEvent(serverHandleFinish, LevelDetailed)
-	ReadHeaderStart    = newEvent(readHeaderStart, LevelDetailed)
-	ReadHeaderFinish   = newEvent(readHeaderFinish, LevelDetailed)
-	ReadBodyStart      = newEvent(readBodyStart, LevelDetailed)
-	ReadBodyFinish     = newEvent(readBodyFinish, LevelDetailed)
-	WriteStart         = newEvent(writeStart, LevelDetailed)
-	WriteFinish        = newEvent(writeFinish, LevelDetailed)
+	ServerHandleStart  = newEvent(serverHandleStart, LevelDetailed)  // 处理开始
+	ServerHandleFinish = newEvent(serverHandleFinish, LevelDetailed) // 处理结束
+	ReadHeaderStart    = newEvent(readHeaderStart, LevelDetailed)    // 标头读取开始
+	ReadHeaderFinish   = newEvent(readHeaderFinish, LevelDetailed)   // 标头读取结束
+	ReadBodyStart      = newEvent(readBodyStart, LevelDetailed)      // 正文读取开始
+	ReadBodyFinish     = newEvent(readBodyFinish, LevelDetailed)     // 正文读取结束
+	WriteStart         = newEvent(writeStart, LevelDetailed)         // 写入开始
+	WriteFinish        = newEvent(writeFinish, LevelDetailed)        // 写入结束
 )
 
 // 错误

@@ -9,16 +9,19 @@ import (
 
 var (
 	ErrConnectionClosed = errors.New("连接已关闭")
-	ErrTimeout          = errors.New("timeout 超时")
-	ErrDialTimeout      = errors.New("timeout 拨号超时")
-	ErrWriteTimeout     = errors.New("timeout 写入超时")
-	ErrReadTimeout      = errors.New("timeout 读取超时")
+	ErrTimeout          = errors.New("timeout")
+	ErrDialTimeout      = errors.New("dial timeout")
+	ErrWriteTimeout     = errors.New("write timeout")
+	ErrReadTimeout      = errors.New("read timeout")
+	ErrIdleTimeout      = errors.New("idle timeout")
 	ErrNoMultipartForm  = errors.New("请求的 Content-Type 无 multipart/form-data")
 	ErrNothingRead      = errors.New("未读取任何内容")
 	ErrNeedMore         = errors.New("需要更多数据")
 	ErrBodyTooLarge     = errors.New("正文大小超过限制")
+	ErrHijacked         = errors.New("连接已被劫持")
 	ErrChunkedStream    = errors.New("错误分块的正文流")
 	ErrNoFreeConns      = errors.New("没有可用的主机连接")
+	ErrShortConnection  = errors.New("短链接")
 )
 
 type ErrorType uint64

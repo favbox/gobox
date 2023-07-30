@@ -28,7 +28,7 @@ type Doer interface {
 	Do(ctx context.Context, req *protocol.Request, resp *protocol.Response) error
 }
 
-// HostClient 用于在多个上游主机之间平衡 http 请求。
+// HostClient 用于在多个上游主机间平衡 http 请求。
 type HostClient interface {
 	Doer
 	SetDynamicConfig(dc *DynamicConfig)

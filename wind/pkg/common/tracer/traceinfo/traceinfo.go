@@ -2,7 +2,9 @@ package traceinfo
 
 // TraceInfo 包含 Wind 中的跟踪信息。
 type TraceInfo interface {
+	// Stats 获取 HTTP 统计信息。
 	Stats() HTTPStats
+	// Reset 重置 HTTP 统计信息。
 	Reset()
 }
 

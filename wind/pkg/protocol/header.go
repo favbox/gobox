@@ -1539,7 +1539,7 @@ func (h *ResponseHeader) SetProtocol(p string) {
 	h.protocol = p
 }
 
-// SetServerBytes 设置服务器响应头。
+// SetServerBytes 设置服务器名称响应头。
 func (h *ResponseHeader) SetServerBytes(server []byte) {
 	h.server = append(h.server[:0], server...)
 }

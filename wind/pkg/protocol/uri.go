@@ -25,6 +25,22 @@ func ReleaseURI(u *URI) {
 	uriPool.Put(u)
 }
 
+// ParseURI 解析 uriStr 为 *URI。
+func ParseURI(uriStr string) *URI {
+	uri := &URI{}
+	uri.Parse(nil, []byte(uriStr))
+
+	return uri
+}
+
+type Proxy func(*Request) (*URI, error)
+
+func ProxyURI(fixedURI *URI) Proxy {
+	return func(*Request) (*URI, error) {
+		return fixedURI, nil
+	}
+}
+
 var uriPool = &sync.Pool{
 	New: func() any {
 		return &URI{}

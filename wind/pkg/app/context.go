@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 	"mime/multipart"
+	"sync"
 	"time"
 
 	"github.com/favbox/gosky/wind/internal/bytesconv"
@@ -33,6 +34,17 @@ type RequestContext struct {
 	handlers HandlersChain
 	fullPath string
 	index    int8 // 该请求处理链的当前索引
+
+	// 该互斥锁用于保护 Keys 映射。
+	mu sync.RWMutex
+
+	// keys 专门用于每个请求上下文的键值对。
+	Keys map[string]any
+
+	hijackHandler HijackHandler
+
+	// finished 意为请求结束。
+	finished chan struct{}
 
 	// 跟踪信息
 	traceInfo traceinfo.TraceInfo
@@ -114,6 +126,14 @@ func (ctx *RequestContext) SetBodyString(body string) {
 	ctx.Response.SetBodyString(body)
 }
 
+// HijackHandler 被劫持连接的处理函数。
+type HijackHandler func(c network.Conn)
+
+// Hijack 注册被劫持连接的处理器。
+func (ctx *RequestContext) Hijack(handler HijackHandler) {
+	ctx.hijackHandler = handler
+}
+
 // IfModifiedSince 如果 lastModified 超过请求标头中的 'If-Modified-Since' 值，则返回真。
 //
 // 若无此标头或日期解析失败也返回真。
@@ -139,6 +159,11 @@ func (ctx *RequestContext) NotModified() {
 // IsHead 是否为 HEAD 请求？
 func (ctx *RequestContext) IsHead() bool {
 	return ctx.Request.Header.IsHead()
+}
+
+// IsGet 是否为 GET 请求？
+func (ctx *RequestContext) IsGet() bool {
+	return ctx.Request.Header.IsGet()
 }
 
 // Host 获取请求的主机地址。
@@ -230,6 +255,71 @@ func (ctx *RequestContext) FormValue(key string) []byte {
 // 另见 FormFile and FormValue.
 func (ctx *RequestContext) MultipartForm() (*multipart.Form, error) {
 	return ctx.Request.MultipartForm()
+}
+
+// Reset 重设请求上下文。
+//
+// 注意：这是一个内部函数。你不应该使用它。
+func (ctx *RequestContext) Reset() {
+	ctx.ResetWithoutConn()
+	ctx.conn = nil
+}
+
+// ResetWithoutConn 重置请求信息（连接除外）。
+func (ctx *RequestContext) ResetWithoutConn() {
+	ctx.Params = ctx.Params[0:0]
+	ctx.Errors = ctx.Errors[0:0]
+	ctx.handlers = nil
+	ctx.index = -1
+	ctx.fullPath = ""
+	ctx.Keys = nil
+
+	if ctx.finished != nil {
+		close(ctx.finished)
+		ctx.finished = nil
+	}
+	ctx.Request.Reset()
+	ctx.Response.Reset()
+	if ctx.IsEnableTrace() {
+		ctx.traceInfo.Reset()
+	}
+}
+
+func (ctx *RequestContext) SetConn(c network.Conn) {
+	ctx.conn = c
+}
+
+func (ctx *RequestContext) GetConn() network.Conn {
+	return ctx.conn
+}
+
+func (ctx *RequestContext) GetReader() network.Reader {
+	return ctx.conn
+}
+
+// SetConnectionClose 设置 'Connection: close' 响应头。
+func (ctx *RequestContext) SetConnectionClose() {
+	ctx.Response.SetConnectionClose()
+}
+
+// GetWriter 获取网络编写器。
+func (ctx *RequestContext) GetWriter() network.Writer {
+	return ctx.conn
+}
+
+// GetHijackHandler 获取被劫持的连接的处理器。
+func (ctx *RequestContext) GetHijackHandler() HijackHandler {
+	return ctx.hijackHandler
+}
+
+// SetHijackHandler 设置被劫持的连接的处理器。
+func (ctx *RequestContext) SetHijackHandler(h HijackHandler) {
+	ctx.hijackHandler = h
+}
+
+// RequestBodyStream 返回请求的正文流。
+func (ctx *RequestContext) RequestBodyStream() io.Reader {
+	return ctx.Request.BodyStream()
 }
 
 type (

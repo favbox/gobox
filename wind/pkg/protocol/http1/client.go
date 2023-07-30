@@ -179,6 +179,14 @@ type HostClient struct {
 	closed chan struct{}
 }
 
+// NewHostClient 创建新的主机客户端。
+func NewHostClient(c *ClientOptions) client.HostClient {
+	hc := &HostClient{
+		ClientOptions: c,
+		closed:        make(chan struct{}),
+	}
+	return hc
+}
 func (c *HostClient) Close() error {
 	close(c.closed)
 	return nil
