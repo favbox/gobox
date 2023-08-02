@@ -44,19 +44,20 @@ func NewServer() *Server {
 
 // Option 表示 HTTP/1.1 服务器选项。
 type Option struct {
-	StreamRequestBody            bool
-	GetOnly                      bool
-	DisablePreParseMultipartForm bool
-	DisableKeepalive             bool
-	NoDefaultServerHeader        bool
-	MaxRequestBodySize           int
-	IdleTimeout                  time.Duration
-	ReadTimeout                  time.Duration
-	ServerName                   []byte
-	TLS                          *tls.Config
-	EnableTrace                  bool // 启用链路追踪
-	ContinueHandler              func(header *protocol.RequestHeader) bool
-	HijackConnHandle             func(c network.Conn, h app.HijackHandler)
+	StreamRequestBody            bool          // 是否流式读取请求正文
+	GetOnly                      bool          // 是否仅支持 GET 请求
+	DisablePreParseMultipartForm bool          // 是否不预先解析多部分表单
+	DisableKeepalive             bool          // 是否禁用长连接
+	NoDefaultServerHeader        bool          // 是否不要默认服务器名称
+	MaxRequestBodySize           int           // 最大请求正文大小
+	IdleTimeout                  time.Duration // 闲置连接的超时时长
+	ReadTimeout                  time.Duration // 读取正文的超时时长
+	ServerName                   []byte        // 服务器名称
+	TLS                          *tls.Config   // 安全链接配置
+	EnableTrace                  bool          // 是否启用链路追踪
+
+	ContinueHandler  func(header *protocol.RequestHeader) bool // 继续阅读处理器
+	HijackConnHandle func(c network.Conn, h app.HijackHandler)
 }
 
 // Server 表示 HTTP/1.1 服务器结构体。
@@ -368,7 +369,7 @@ func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 			traceCtl.DoFinish(cc, ctx, err)
 		}
 
-		// 返回待关闭指示
+		// 连接已关闭，则退出 for 循环
 		if connectionClose {
 			return errShortConnection
 		}

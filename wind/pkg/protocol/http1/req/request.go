@@ -308,7 +308,7 @@ func write(req *protocol.Request, w network.Writer, usingProxy bool) error {
 	body := req.BodyBytes()
 	err := handleMultipart(req)
 	if err != nil {
-		return fmt.Errorf("处理多部分表单错误：%s", err)
+		return fmt.Errorf("处理多部分表单出错：%s", err)
 	}
 	if req.OnlyMultipartForm() {
 		m, _ := req.MultipartForm()

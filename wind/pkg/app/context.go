@@ -322,6 +322,26 @@ func (ctx *RequestContext) RequestBodyStream() io.Reader {
 	return ctx.Request.BodyStream()
 }
 
+// 写入 p 到响应正文。
+func (ctx *RequestContext) Write(p []byte) (int, error) {
+	ctx.Response.AppendBody(p)
+	return len(p), nil
+}
+
+// Flush 是 ctx.Response.GetHijackWriter().Flush() 的快捷键。
+// 若响应书写器未被劫持，则返回空。
+func (ctx *RequestContext) Flush() error {
+	if ctx.Response.GetHijackWriter() == nil {
+		return nil
+	}
+	return ctx.Response.GetHijackWriter().Flush()
+}
+
+// Body 返回请求正文数据。
+func (ctx *RequestContext) Body() ([]byte, error) {
+	return ctx.Request.BodyE()
+}
+
 type (
 	// ClientIP 自定义获取客户端 IP 的函数
 	ClientIP        func(ctx *RequestContext) string
@@ -366,7 +386,7 @@ func ClientIPWithOption(opts ClientIPOptions) ClientIP {
 	}
 }
 
-// NewContext 创建一个指定最大路由参数的无请求/响应信息的纯粹 RequestContext。
+// NewContext 创建一个指定初始最大路由参数的无请求/响应信息的纯粹上下文。
 func NewContext(maxParams uint16) *RequestContext {
 	v := make(param.Params, 0, maxParams)
 	ctx := &RequestContext{Params: v, index: -1}

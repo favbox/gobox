@@ -20,7 +20,7 @@ var (
 	ErrBodyTooLarge     = errors.New("正文大小超过限制")
 	ErrHijacked         = errors.New("连接已被劫持")
 	ErrChunkedStream    = errors.New("错误分块的正文流")
-	ErrNoFreeConns      = errors.New("没有可用的主机连接")
+	ErrNoFreeConns      = errors.New("没有空闲连接")
 	ErrShortConnection  = errors.New("短链接")
 )
 

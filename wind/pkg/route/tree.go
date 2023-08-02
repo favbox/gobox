@@ -46,7 +46,7 @@ type (
 		hasTsrHandler map[string]bool
 	}
 
-	// MethodTrees 路由方法树切片
+	// MethodTrees 是路由器的方法树切片
 	MethodTrees []*router
 )
 

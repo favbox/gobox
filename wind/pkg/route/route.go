@@ -45,7 +45,7 @@ type Routers interface {
 	Group(string, ...app.HandlerFunc) *RouterGroup
 }
 
-// RouterGroup 表示路由分组的配置，由前缀路径和一组处理器（中间件）组成。
+// RouterGroup 表示一个路由组，由前缀路径和一组处理器（中间件）组成。
 type RouterGroup struct {
 	Handlers app.HandlersChain
 	basePath string

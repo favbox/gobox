@@ -214,6 +214,7 @@ func (c *HostClient) closeConn(cc *clientConn) {
 	releaseClientConn(cc)
 }
 
+// ConnectionCount 返回连接池中的空闲连接数量。
 func (c *HostClient) ConnectionCount() (count int) {
 	c.connsLock.Lock()
 	count = len(c.conns)

@@ -15,7 +15,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/protocol/http1/ext"
 )
 
-var errEOFReadHeader = errs.NewPublic("读取请求标头错误：EOF")
+var errEOFReadHeader = errs.NewPublic("读取请求标头错出错：EOF")
 
 // WriteHeader 写入请求头 h 至 w。
 func WriteHeader(h *protocol.RequestHeader, w network.Writer) error {

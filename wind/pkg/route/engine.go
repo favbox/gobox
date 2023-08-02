@@ -23,6 +23,7 @@ import (
 const unknownTransporterName = "unknown"
 
 var (
+	// 默认网络传输器（基于标准库实现，另外可选 netpoll.NewTransporter）
 	defaultTransporter = standard.NewTransporter
 
 	errInitFailed       = errs.NewPrivate("路由引擎已被初始化")
@@ -71,7 +72,7 @@ type Engine struct {
 	tracerCtl   tracer.Controller
 	enableTrace bool
 
-	// TODO 用于管理协议层
+	// 管理协议层不同协议对应的服务器的创建
 	protocolSuite *suite.Config
 
 	// RequestContext 连接池
@@ -130,6 +131,7 @@ func (engine *Engine) addRoute(method, path string, handlers app.HandlersChain) 
 	//	TODO 待完善
 }
 
+// 分配一个限定
 func (engine *Engine) allocateContext() *app.RequestContext {
 	ctx := engine.NewContext()
 	ctx.Request.SetMaxKeepBodySize(engine.options.MaxKeepBodySize)
@@ -167,7 +169,15 @@ func initTrace(engine *Engine) stats.Level {
 }
 
 func NewEngine(opt *config.Options) *Engine {
-	engine := &Engine{}
+	engine := &Engine{
+		trees: make(MethodTrees, 0, 9),
+		RouterGroup: RouterGroup{
+			Handlers: nil,
+			basePath: opt.BasePath,
+			root:     true,
+		},
+		transport: defaultTransporter(opt),
+	}
 	if opt.TransporterNewer != nil {
 		engine.transport = opt.TransporterNewer(opt)
 	}
@@ -175,7 +185,7 @@ func NewEngine(opt *config.Options) *Engine {
 
 	traceLevel := initTrace(engine)
 
-	// 准备 RequestContext 池
+	// 定义 RequestContext 上下文池的新建函数
 	engine.ctxPool.New = func() any {
 		ctx := engine.allocateContext()
 		if engine.enableTrace {

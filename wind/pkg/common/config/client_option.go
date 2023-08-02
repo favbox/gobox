@@ -11,9 +11,9 @@ import (
 
 // ConnPoolState 客户端连接池的状态结构体。
 type ConnPoolState struct {
-	// 连接池的连接数量。这些连接为空闲连接。
+	// 连接池的连接数量，即空闲连接数量。
 	PoolConnNum int
-	// 连接总数。
+	// 总连接数。
 	TotalConnNum int
 	// 挂起的连接数量。
 	WaitConnNum int
