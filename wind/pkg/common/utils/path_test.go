@@ -17,3 +17,41 @@ func TestPathAddMissingPort(t *testing.T) {
 		assert.DeepEqual(t, ip+customizedPort, AddMissingPort(ip+customizedPort, false))
 	}
 }
+
+func TestCleanPath(t *testing.T) {
+	normalPath := "/Foo/Bar/go/src/github.com/gosky/wind/pkg/common/utils/path_test.go"
+	expectedNormalPath := "/Foo/Bar/go/src/github.com/gosky/wind/pkg/common/utils/path_test.go"
+	cleanNormalPath := CleanPath(normalPath)
+	assert.DeepEqual(t, expectedNormalPath, cleanNormalPath)
+
+	singleDotPath := "/Foo/Bar/./././go/src"
+	expectedSingleDotPath := "/Foo/Bar/go/src"
+	cleanSingleDotPath := CleanPath(singleDotPath)
+	assert.DeepEqual(t, expectedSingleDotPath, cleanSingleDotPath)
+
+	doubleDotPath := "../../.."
+	expectedDoubleDotPath := "/"
+	cleanDoublePotPath := CleanPath(doubleDotPath)
+	assert.DeepEqual(t, expectedDoubleDotPath, cleanDoublePotPath)
+
+	// 多点可作文件名
+	multiDotPath := "/../...."
+	expectedMultiDotPath := "/...."
+	cleanMultiDotPath := CleanPath(multiDotPath)
+	assert.DeepEqual(t, expectedMultiDotPath, cleanMultiDotPath)
+
+	nullPath := ""
+	expectedNullPath := "/"
+	cleanNullPath := CleanPath(nullPath)
+	assert.DeepEqual(t, expectedNullPath, cleanNullPath)
+
+	relativePath := "/Foo/Bar/../go/src/../../github.com/gosky/wind"
+	expectedRelativePath := "/Foo/github.com/gosky/wind"
+	cleanRelativePath := CleanPath(relativePath)
+	assert.DeepEqual(t, expectedRelativePath, cleanRelativePath)
+
+	multiSlashPath := "///////Foo//Bar////go//src/github.com/gosky/wind//.."
+	expectedMultiSlashPath := "/Foo/Bar/go/src/github.com/gosky"
+	cleanMultiSlashPath := CleanPath(multiSlashPath)
+	assert.DeepEqual(t, expectedMultiSlashPath, cleanMultiSlashPath)
+}

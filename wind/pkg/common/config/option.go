@@ -48,13 +48,13 @@ type Options struct {
 	// 将 /FOO 和 /..//FOO 重定向到 /foo，默认不重定向。
 	RedirectFixedPath bool
 
-	// 若启用，则方法不允许时路由器尝试查找
+	// 是否处理请求方法不允许时使用可用的替代方法
 	HandleMethodNotAllowed bool
 
 	// 用 url.RawPath 来查找参数。
 	UseRawPath bool
 
-	// 移除额外的斜线，以从URL中解析参数。
+	// 移除额外的斜杠，以从URL中解析参数。
 	RemoveExtraSlash bool
 
 	// 是否不转义路径值，默认不转义。
@@ -73,8 +73,8 @@ type Options struct {
 	BasePath                     string        // 基本路径，默认 "/"
 	ExitWaitTimeout              time.Duration // 优雅退出的等待时间，默认 5s。
 	TLS                          *tls.Config
-	ALPN                         bool  // ALPN 开关
-	H2C                          bool  // H2C 开关
+	ALPN                         bool  // ALPN 应用层协议协商的开关
+	H2C                          bool  // H2C 即 HTTP/2 Cleartext 协议开关
 	ReadBufferSize               int   // 初始的读缓冲大小，默认 4KB。通常无需设置。
 	Tracers                      []any // 一组链路跟踪器
 	TraceLevel                   any   // 跟踪级别，默认 stats.LevelDetailed
@@ -98,7 +98,7 @@ type Options struct {
 	// 用于服务注册的信息。
 	RegistryInfo *registry.Info
 
-	// 启用 HTML 模板自动重载机制
+	// 是否自动重载 HTML 模板?
 	AutoReloadRender bool
 
 	// HTML 模板自动重载时间间隔。

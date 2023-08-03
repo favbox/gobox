@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"io"
 	"mime/multipart"
 	"sync"
@@ -342,6 +343,48 @@ func (ctx *RequestContext) Body() ([]byte, error) {
 	return ctx.Request.BodyE()
 }
 
+// Next 仅限中间件内部使用。
+// 它将执行当前处理链内部所有挂起的处理器。
+func (ctx *RequestContext) Next(c context.Context) {
+	ctx.index++
+	for ctx.index < int8(len(ctx.handlers)) {
+		ctx.handlers[ctx.index](c, ctx)
+		ctx.index++
+	}
+}
+
+// SetHandlers 设置当前请求上下文的处理链。
+func (ctx *RequestContext) SetHandlers(handlers HandlersChain) {
+	ctx.handlers = handlers
+}
+
+// SetFullPath 设置当前请求上下文的完整路径。
+func (ctx *RequestContext) SetFullPath(p string) {
+	ctx.fullPath = p
+}
+
+// Redirect 重定向网址。
+func (ctx *RequestContext) Redirect(statusCode int, uri []byte) {
+	ctx.redirect(uri, statusCode)
+}
+
+func (ctx *RequestContext) redirect(uri []byte, statusCode int) {
+	ctx.Response.Header.SetCanonical(bytestr.StrLocation, uri)
+	statusCode = getRedirectStatusCode(statusCode)
+	ctx.Response.SetStatusCode(statusCode)
+}
+
+func getRedirectStatusCode(statusCode int) int {
+	if statusCode == consts.StatusMovedPermanently ||
+		statusCode == consts.StatusFound ||
+		statusCode == consts.StatusSeeOther ||
+		statusCode == consts.StatusTemporaryRedirect ||
+		statusCode == consts.StatusPermanentRedirect {
+		return statusCode
+	}
+	return consts.StatusFound
+}
+
 type (
 	// ClientIP 自定义获取客户端 IP 的函数
 	ClientIP        func(ctx *RequestContext) string
@@ -374,7 +417,7 @@ var defaultFormValue = func(ctx *RequestContext, key string) []byte {
 }
 
 var defaultClientIPOptions = ClientIPOptions{
-	RemoteIPHeaders: []string{"X-Real-IP", "X-Forward-For"},
+	RemoteIPHeaders: []string{"X-Real-IP", "X-Forwarded-For"},
 	TrustedProxies:  map[string]bool{"0.0.0.0": true},
 }
 var defaultClientIP = ClientIPWithOption(defaultClientIPOptions)

@@ -12,6 +12,7 @@ import (
 	"github.com/favbox/gosky/wind/internal/bytestr"
 	internalStats "github.com/favbox/gosky/wind/internal/stats"
 	"github.com/favbox/gosky/wind/pkg/app"
+	"github.com/favbox/gosky/wind/pkg/app/server/render"
 	errs "github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/common/tracer/stats"
 	"github.com/favbox/gosky/wind/pkg/common/tracer/traceinfo"
@@ -44,20 +45,21 @@ func NewServer() *Server {
 
 // Option 表示 HTTP/1.1 服务器选项。
 type Option struct {
-	StreamRequestBody            bool          // 是否流式读取请求正文
-	GetOnly                      bool          // 是否仅支持 GET 请求
-	DisablePreParseMultipartForm bool          // 是否不预先解析多部分表单
-	DisableKeepalive             bool          // 是否禁用长连接
-	NoDefaultServerHeader        bool          // 是否不要默认服务器名称
-	MaxRequestBodySize           int           // 最大请求正文大小
-	IdleTimeout                  time.Duration // 闲置连接的超时时长
-	ReadTimeout                  time.Duration // 读取正文的超时时长
-	ServerName                   []byte        // 服务器名称
-	TLS                          *tls.Config   // 安全链接配置
-	EnableTrace                  bool          // 是否启用链路追踪
+	StreamRequestBody            bool              // 是否流式读取请求正文
+	GetOnly                      bool              // 是否仅支持 GET 请求
+	DisablePreParseMultipartForm bool              // 是否不预先解析多部分表单
+	DisableKeepalive             bool              // 是否禁用长连接
+	NoDefaultServerHeader        bool              // 是否不要默认服务器名称
+	MaxRequestBodySize           int               // 最大请求正文大小
+	IdleTimeout                  time.Duration     // 闲置连接的超时时长
+	ReadTimeout                  time.Duration     // 读取正文的超时时长
+	ServerName                   []byte            // 服务器名称
+	TLS                          *tls.Config       // 安全链接配置
+	EnableTrace                  bool              // 是否启用链路追踪
+	HTMLRender                   render.HTMLRender // HTML 渲染器
 
-	ContinueHandler  func(header *protocol.RequestHeader) bool // 继续阅读处理器
-	HijackConnHandle func(c network.Conn, h app.HijackHandler)
+	ContinueHandler  func(header *protocol.RequestHeader) bool // 继续读取处理器
+	HijackConnHandle func(c network.Conn, h app.HijackHandler) // 劫持连接处理器
 }
 
 // Server 表示 HTTP/1.1 服务器结构体。

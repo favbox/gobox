@@ -11,6 +11,16 @@ import (
 	"github.com/favbox/gosky/wind/pkg/protocol"
 )
 
+// HTTP1 必须和 ALPN nextProto 的值相同。
+const (
+	HTTP1 = "http/1.1"
+	HTTP2 = "h2"
+	// HTTP3Draft29 是在 TLS 握手期间的 ALPN 协商协议，用于 QUIC 29 号草案。
+	HTTP3Draft29 = "h3-29"
+	// HTTP3 是在 TLS 握手期间的 ALPN 协商协议，用于 QUIC v1 和 v2。
+	HTTP3 = "h3"
+)
+
 // Core 是承诺为协议层提供扩展的核心接口。
 type Core interface {
 	// IsRunning 检查引擎是否在运行。
@@ -150,7 +160,7 @@ func (c *Config) LoadAll(core Core) (serverMap ServerMap, streamServerMap Stream
 	return serverMap, streamServerMap, nil
 }
 
-// New 返回空白协议组配置，用 *Config.Add 来添加协议对应的服务器实现。
+// New 返回空白协议组配置，再用 *Config.Add 来添加协议对应的服务器实现。
 func New() *Config {
 	c := &Config{
 		configMap:       make(map[string]ServerFactory),

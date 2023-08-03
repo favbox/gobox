@@ -731,7 +731,7 @@ func (req *Request) SetQueryString(queryString string) {
 	req.URI().SetQueryString(queryString)
 }
 
-// SetRequestURI 设置完全限定的网址，即包含 scheme 和 host。
+// SetRequestURI 设置完全限定的网址，即包含 scheme://host/path。
 func (req *Request) SetRequestURI(requestURI string) {
 	req.Header.SetRequestURI(requestURI)
 	req.parsedURI = false

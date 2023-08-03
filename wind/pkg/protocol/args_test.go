@@ -81,10 +81,10 @@ func TestArgsParseBytes(t *testing.T) {
 func TestArgsVisitAll(t *testing.T) {
 	var a Args
 	var s []string
-	a.Add("cloudwego", "wind")
+	a.Add("gosky", "wind")
 	a.Add("hello", "world")
 	a.VisitAll(func(key, value []byte) {
 		s = append(s, string(key), string(value))
 	})
-	assert.DeepEqual(t, []string{"cloudwego", "wind", "hello", "world"}, s)
+	assert.DeepEqual(t, []string{"gosky", "wind", "hello", "world"}, s)
 }
