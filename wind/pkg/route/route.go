@@ -179,6 +179,8 @@ func (group *RouterGroup) calculateAbsolutePath(relativePath string) string {
 	return joinPaths(group.basePath, relativePath)
 }
 
+// 合并给定的处理链至当前路由组。
+// 注意：若合并后的长度超过 consts.AbortIndex 会引发恐慌。
 func (group *RouterGroup) combineHandlers(handlers app.HandlersChain) app.HandlersChain {
 	finalSize := len(group.Handlers) + len(handlers)
 	if finalSize >= int(rConsts.AbortIndex) {
