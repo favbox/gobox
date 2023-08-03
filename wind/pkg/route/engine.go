@@ -1,9 +1,13 @@
 package route
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -65,6 +69,7 @@ type hijackConn struct {
 	e *Engine
 }
 
+// Engine 路由引擎，实现路由及协议服务器。
 type Engine struct {
 	noCopy nocopy.NoCopy
 
@@ -140,6 +145,40 @@ type Engine struct {
 	clientIPFunc app.ClientIP
 	// 自定义获取表单值的函数。
 	formValueFunc app.FormValueFunc
+}
+
+func NewEngine(opt *config.Options) *Engine {
+	engine := &Engine{
+		trees: make(MethodTrees, 0, 9),
+		RouterGroup: RouterGroup{
+			Handlers: nil,
+			basePath: opt.BasePath,
+			root:     true,
+		},
+		transport: defaultTransporter(opt),
+	}
+	if opt.TransporterNewer != nil {
+		engine.transport = opt.TransporterNewer(opt)
+	}
+	engine.RouterGroup.engine = engine
+
+	traceLevel := initTrace(engine)
+
+	// 定义 RequestContext 上下文池的新建函数
+	engine.ctxPool.New = func() any {
+		ctx := engine.allocateContext()
+		if engine.enableTrace {
+			ti := traceinfo.NewTraceInfo()
+			ti.Stats().SetLevel(traceLevel)
+			ctx.SetTraceInfo(ti)
+		}
+		return ctx
+	}
+
+	// 初始化协议组
+	engine.protocolSuite = suite.New()
+
+	return engine
 }
 
 // Init 初始化路由引擎。
@@ -233,6 +272,7 @@ func (engine *Engine) Routes() (routes Routes) {
 	return routes
 }
 
+// 递归路由并返回。
 func iterate(method string, routes Routes, root *node) Routes {
 	if len(root.handlers) > 0 {
 		handlerFunc := root.handlers.Last()
@@ -257,6 +297,102 @@ func iterate(method string, routes Routes, root *node) Routes {
 	}
 
 	return routes
+}
+
+func (engine *Engine) Run() (err error) {
+	if err = engine.Init(); err != nil {
+		return err
+	}
+
+	if !atomic.CompareAndSwapUint32(&engine.status, statusInitialized, statusRunning) {
+		return errAlreadyRunning
+	}
+	defer atomic.SwapUint32(&engine.status, statusClosed)
+
+	// 触发可能存在的回调钩子
+	ctx := context.Background()
+	for i := range engine.OnRun {
+		if err = engine.OnRun[i](ctx); err != nil {
+			return err
+		}
+	}
+
+	return engine.listenAndServe()
+}
+
+func (engine *Engine) listenAndServe() error {
+	hlog.SystemLogger().Infof("使用网络库=%s", engine.GetTransporterName())
+	return engine.transport.ListenAndServe(engine.onData)
+}
+
+func (engine *Engine) onData(ctx context.Context, conn any) (err error) {
+	switch conn := conn.(type) {
+	case network.Conn:
+		err = engine.Serve(ctx, conn)
+	case network.StreamConn:
+		err = engine.ServeStream(ctx, conn)
+	}
+	return
+}
+
+func (engine *Engine) Serve(ctx context.Context, conn network.Conn) (err error) {
+	defer func() {
+		errProcess(conn, err)
+	}()
+
+	// H2C 协议
+	if engine.options.H2C {
+		// 协议嗅探器
+		buf, _ := conn.Peek(len(bytestr.StrClientPreface))
+		if bytes.Equal(buf, bytestr.StrClientPreface) && engine.protocolServers[suite.HTTP2] != nil {
+			return engine.protocolServers[suite.HTTP2].Serve(ctx, conn)
+		}
+		hlog.SystemLogger().Warn("HTTP2 服务器未加载，请求正在回退到 HTTP1 服务器")
+	}
+
+	// ALPN 协议
+	if engine.options.ALPN && engine.options.TLS != nil {
+		proto, err1 := engine.getNextProto(conn)
+		if err1 != nil {
+			// 握手时，客户端关闭了连接，关闭即可。
+			if err1 == io.EOF {
+				return nil
+			}
+			// 向 HTTPS 发送 HTTP
+			if re, ok := err1.(tls.RecordHeaderError); ok && re.Conn != nil && utils.TLSRecordHeaderLooksLikeHTTP(re.RecordHeader) {
+				io.WriteString(re.Conn, "HTTP/1.0 400 Bad Request\r\n\r\n客户端向 HTTPS 服务器发送了 HTTP 请求。\n")
+				re.Conn.Close()
+				return re
+			}
+			return err1
+		}
+		if server, ok := engine.protocolServers[proto]; ok {
+			return server.Serve(ctx, conn)
+		}
+	}
+
+	// HTTP1 协议
+	err = engine.protocolServers[suite.HTTP1].Serve(ctx, conn)
+
+	return
+}
+
+func (engine *Engine) ServeStream(ctx context.Context, conn network.StreamConn) (err error) {
+	// ALPN 协议
+	if engine.options.ALPN && engine.options.TLS != nil {
+		version := conn.GetVersion()
+		nextProtocol := versionToALPN(version)
+		if server, ok := engine.protocolStreamServers[nextProtocol]; ok {
+			return server.Serve(ctx, conn)
+		}
+	}
+
+	// 默认协议 HTTP3
+	if server, ok := engine.protocolStreamServers[suite.HTTP3]; ok {
+		return server.Serve(ctx, conn)
+	}
+
+	return errs.ErrNotSupportProtocol
 }
 
 // LoadHTMLFiles 加载一组 HTML 文件，并关联到 HTML 渲染器。
@@ -294,6 +430,11 @@ func (engine *Engine) LoadHTMLGlob(pattern string) {
 	engine.SetHTMLTemplate(tmpl)
 }
 
+// SetAltHeader 为目标协议 targetProtocol 的可替换协议设置 "Alt-Svc" 标头的值。
+func (engine *Engine) SetAltHeader(targetProtocol, altHeaderValue string) {
+	engine.protocolSuite.SetAltHeader(targetProtocol, altHeaderValue)
+}
+
 // SetAutoReloadHTMLTemplate 关联模板与调试环境的 HTML 模板渲染器。
 func (engine *Engine) SetAutoReloadHTMLTemplate(tmpl *template.Template, files []string) {
 	engine.htmlRender = &render.HTMLDebug{
@@ -310,6 +451,54 @@ func (engine *Engine) SetHTMLTemplate(tmpl *template.Template) {
 	engine.htmlRender = render.HTMLProduction{
 		Template: tmpl.Funcs(engine.funcMap),
 	}
+}
+
+// Shutdown 优雅退出服务器，步骤如下：
+//
+//  1. 依次触发 Engine.OnShutdown 钩子函数，直至完成或超时
+//  2. 关闭网络监听器，这意味着不再接受新连接
+//  3. 等待所有连接关闭：
+//     短时可处理的连接处理完就关闭
+//     手里的或下一个请求，等到空闲超时 IdleTimeout 或 优雅退出超时 ExitWaitTime。
+//  4. 退出
+func (engine *Engine) Shutdown(ctx context.Context) (err error) {
+	if atomic.LoadUint32(&engine.status) != statusRunning {
+		return errStatusNotRunning
+	}
+	if !atomic.CompareAndSwapUint32(&engine.status, statusRunning, statusShutdown) {
+		return
+	}
+
+	ch := make(chan struct{})
+	// 触发可能的钩子
+	go engine.executeOnShutdownHooks(ctx, ch)
+
+	defer func() {
+		// 确保钩子执行完成或超时
+		select {
+		case <-ctx.Done():
+			hlog.SystemLogger().Infof("执行 OnShutdownHooks 超时：错误=%v", ctx.Err())
+			return
+		case <-ch:
+			hlog.SystemLogger().Info("执行 OnShutdownHooks 完成")
+			return
+		}
+	}()
+
+	// 注销服务
+	if opt := engine.options; opt != nil && opt.Registry != nil {
+		if err = opt.Registry.Deregister(opt.RegistryInfo); err != nil {
+			hlog.SystemLogger().Errorf("服务注销出错 error=%v", err)
+			return err
+		}
+	}
+
+	// 关闭网络传输器
+	if err := engine.transport.Shutdown(ctx); err != ctx.Err() {
+		return err
+	}
+
+	return
 }
 
 // 让路由引擎实现处理器接口。
@@ -378,6 +567,16 @@ func (engine *Engine) ServeHTTP(c context.Context, ctx *app.RequestContext) {
 	}
 	ctx.SetHandlers(engine.allNoRoute)
 	serveError(c, ctx, consts.StatusNotFound, default400Body)
+}
+
+// Use 附加中间件到服务器。即中间件将包含在每个请求的处理链中，甚至 404, 405, 静态文件...
+//
+// 例如，可通过中间件进行日志记录或错误管理。
+func (engine *Engine) Use(middleware ...app.HandlerFunc) Router {
+	engine.RouterGroup.Use(middleware...)
+	engine.rebuild404Handlers()
+	engine.rebuild405Handlers()
+	return engine
 }
 
 // AddProtocol 添加给定协议的服务器工厂方法。
@@ -452,6 +651,16 @@ func (engine *Engine) HijackConnHandle(c network.Conn, h app.HijackHandler) {
 // SetClientIPFunc 设置获取客户端 IP 的自定义函数。
 func (engine *Engine) SetClientIPFunc(f app.ClientIP) {
 	engine.clientIPFunc = f
+}
+
+// SetFormValueFunc 设置获取表单值的自定义函数。
+func (engine *Engine) SetFormValueFunc(f app.FormValueFunc) {
+	engine.formValueFunc = f
+}
+
+// SetFuncMap 设置用于 template.FuncMap 的模板函数映射。
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+	engine.funcMap = funcMap
 }
 
 func (engine *Engine) addRoute(method, path string, handlers app.HandlersChain) {
@@ -535,6 +744,35 @@ func (engine *Engine) releaseHijackConn(hjc *hijackConn) {
 	}
 	hjc.Conn = nil
 	engine.hijackConnPool.Put(hjc)
+}
+
+// 获取可能的安全连接的下一个协商协议。
+func (engine *Engine) getNextProto(conn network.Conn) (proto string, err error) {
+	if tlsConn, ok := conn.(network.ConnTLSer); ok {
+		if engine.options.ReadTimeout > 0 {
+			if err := conn.SetReadTimeout(engine.options.ReadTimeout); err != nil {
+				hlog.SystemLogger().Errorf("BUG: 设置连接的读取超时时长=%s 错误=%s", engine.options.ReadTimeout, err)
+			}
+		}
+		err = tlsConn.Handshake()
+		if err == nil {
+			proto = tlsConn.ConnectionState().NegotiatedProtocol
+		}
+	}
+	return
+}
+
+func (engine *Engine) executeOnShutdownHooks(ctx context.Context, ch chan struct{}) {
+	wg := sync.WaitGroup{}
+	for i := range engine.OnShutdown {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			engine.OnShutdown[index](ctx)
+		}(i)
+	}
+	wg.Wait()
+	ch <- struct{}{}
 }
 
 func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlersChain) {
@@ -654,36 +892,57 @@ func serveError(c context.Context, ctx *app.RequestContext, code int, defaultMes
 	}
 }
 
-func NewEngine(opt *config.Options) *Engine {
-	engine := &Engine{
-		trees: make(MethodTrees, 0, 9),
-		RouterGroup: RouterGroup{
-			Handlers: nil,
-			basePath: opt.BasePath,
-			root:     true,
-		},
-		transport: defaultTransporter(opt),
+func errProcess(conn io.Closer, err error) {
+	if err == nil {
+		return
 	}
-	if opt.TransporterNewer != nil {
-		engine.transport = opt.TransporterNewer(opt)
-	}
-	engine.RouterGroup.engine = engine
 
-	traceLevel := initTrace(engine)
-
-	// 定义 RequestContext 上下文池的新建函数
-	engine.ctxPool.New = func() any {
-		ctx := engine.allocateContext()
-		if engine.enableTrace {
-			ti := traceinfo.NewTraceInfo()
-			ti.Stats().SetLevel(traceLevel)
-			ctx.SetTraceInfo(ti)
+	defer func() {
+		if err != nil {
+			conn.Close()
 		}
-		return ctx
+	}()
+
+	// 静默关闭连接
+	if errors.Is(err, errs.ErrShortConnection) || errors.Is(err, errs.ErrIdleTimeout) {
+		return
 	}
 
-	// 初始化协议组
-	engine.protocolSuite = suite.New()
+	// 不处理劫持连接的错误
+	if errors.Is(err, errs.ErrHijacked) {
+		err = nil
+		return
+	}
 
-	return engine
+	// 获取供外部使用的远程地址
+	rip := getRemoteAddrFromCloser(conn)
+
+	// 处理特定错误
+	if hse, ok := conn.(network.HandleSpecificError); ok {
+		if hse.HandleSpecificError(err, rip) {
+			return
+		}
+	}
+
+	// 处理其他错误
+	hlog.SystemLogger().Errorf(hlog.EngineErrorFormat, err.Error(), rip)
+}
+
+func getRemoteAddrFromCloser(conn io.Closer) string {
+	if c, ok := conn.(network.Conn); ok {
+		if addr := c.RemoteAddr(); addr != nil {
+			return addr.String()
+		}
+	}
+	return ""
+}
+
+func versionToALPN(v uint32) string {
+	if v == network.Version1 || v == network.Version2 {
+		return suite.HTTP3
+	}
+	if v == network.VersionTLS || v == network.VersionDraft29 {
+		return suite.HTTP3Draft29
+	}
+	return ""
 }

@@ -59,8 +59,9 @@ type Conn interface {
 	Reader
 	Writer
 
-	// SetReadTimeout 适用于每个读取进程
+	// SetReadTimeout 设置每个连接读取进程的超时时长
 	SetReadTimeout(t time.Duration) error
+	// SetWriteTimeout 设置每个连接写入进程的超时时长
 	SetWriteTimeout(t time.Duration) error
 }
 
@@ -86,7 +87,7 @@ type DialFunc func(addr string) (Conn, error)
 
 /****************** 基于流的网络连接 ******************/
 
-// StreamConn 是基于流的抽象网络连接。
+// StreamConn 表示流式连接。
 type StreamConn interface {
 	GetRawConnection() any
 	// HandshakeComplete 阻塞至握手完成（或失败）。

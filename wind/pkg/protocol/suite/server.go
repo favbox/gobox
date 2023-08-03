@@ -9,6 +9,7 @@ import (
 	"github.com/favbox/gosky/wind/pkg/common/hlog"
 	"github.com/favbox/gosky/wind/pkg/common/tracer"
 	"github.com/favbox/gosky/wind/pkg/protocol"
+	"github.com/favbox/gosky/wind/pkg/protocol/consts"
 )
 
 // HTTP1 必须和 ALPN nextProto 的值相同。
@@ -158,6 +159,15 @@ func (c *Config) LoadAll(core Core) (serverMap ServerMap, streamServerMap Stream
 
 	// 返回创建的协议与服务器映射
 	return serverMap, streamServerMap, nil
+}
+
+func (c *Config) SetAltHeader(targetProtocol string, altHeader string) {
+	c.altServerConfig = &altServerConfig{
+		targetProtocol: targetProtocol,
+		setAltHeaderFunc: func(ctx context.Context, reqCtx *app.RequestContext) {
+			reqCtx.Response.Header.Add(consts.HeaderAltSvc, altHeader)
+		},
+	}
 }
 
 // New 返回空白协议组配置，再用 *Config.Add 来添加协议对应的服务器实现。

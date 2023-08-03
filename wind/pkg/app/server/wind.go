@@ -6,6 +6,8 @@ import (
 )
 
 // Wind 是 wind 的核心结构体。
+//
+// 组合了路由引擎 route.Engine 和 优雅退出函数。
 type Wind struct {
 	*route.Engine
 	// 用于接收信息实现优雅退出

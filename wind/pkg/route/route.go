@@ -11,7 +11,7 @@ import (
 	rConsts "github.com/favbox/gosky/wind/pkg/route/consts"
 )
 
-// Route 表示请求路由的规范，包括请求方法、路径及其处理程序。
+// Route 表示请求路由的信息，包括请求方法、路径及其处理程序。
 type Route struct {
 	Method      string
 	Path        string
@@ -19,7 +19,7 @@ type Route struct {
 	HandlerFunc app.HandlerFunc
 }
 
-// Routes 定义了一组路由。
+// Routes 定义了一组路由信息。
 type Routes []Route
 
 // Router 定义了所有路由处理器的接口。
