@@ -11,6 +11,8 @@ import (
 	rConsts "github.com/favbox/gosky/wind/pkg/route/consts"
 )
 
+var upperLetterReg = regexp.MustCompile("^[A-Z]+$")
+
 // Route 表示请求路由的信息，包括请求方法、路径及其处理程序。
 type Route struct {
 	Method      string
@@ -60,20 +62,34 @@ func init() {
 
 var _ Routers = (*RouterGroup)(nil)
 
-// Use 添加中间件到路由组。
-func (group *RouterGroup) Use(middleware ...app.HandlerFunc) Router {
-	group.Handlers = append(group.Handlers, middleware...)
-	return group.returnObj()
+// BasePath 获取路由组的基础路径，即这组路由的共同前缀。
+func (group *RouterGroup) BasePath() string {
+	return group.basePath
 }
 
-var upperLetterReg = regexp.MustCompile("^[A-Z]+$")
+// Group 创建一个新的路由组。可用于添加具有相同中间件或相同前缀的路由。
+//
+// 例如，所有使用相同鉴权中间件的路由可以分到一个路由组。
+func (group *RouterGroup) Group(relativePath string, handlers ...app.HandlerFunc) *RouterGroup {
+	return &RouterGroup{
+		Handlers: group.combineHandlers(handlers),
+		basePath: group.calculateAbsolutePath(relativePath),
+		engine:   group.engine,
+	}
+}
 
-// Handle 注册一个指定方法和路径的请求处理函数或中间件。
-// 最后一个处理函数应为真正函数，其余函数应可共享于不同中间件。
+// Use 添加给定中间件到该路由组。
+func (group *RouterGroup) Use(middleware ...app.HandlerFunc) Router {
+	group.Handlers = append(group.Handlers, middleware...)
+	return group.asObject()
+}
+
+// Handle 注册给定路径需要经由的处理器或中间件。
+// 最后一个 app.HandlerFunc 应为真正函数，其余函数应为中间件。
 //
 // 对于 GET, POST, DELETE, PATCH, PUT, OPTIONS 和 HEAD 请求，可使用对应的快捷函数。
 //
-// 该函数为请求处理的通用函数，也可用于低频或非标的自定义请求方法（如：与代理的内部通信）。
+// 该函数为请求处理的通用函数，也可用于低频或非标的请求方法（如：与代理的内部通信等）。
 func (group *RouterGroup) Handle(httpMethod string, relativePath string, handlers ...app.HandlerFunc) Router {
 	if matches := upperLetterReg.MatchString(httpMethod); !matches {
 		panic("http 请求方法 `" + httpMethod + "` 无效")
@@ -81,7 +97,7 @@ func (group *RouterGroup) Handle(httpMethod string, relativePath string, handler
 	return group.handle(httpMethod, relativePath, handlers)
 }
 
-// Any 注册与所有方法都匹配的路由。
+// Any 注册给定路径的所有请求方法都可以经由的处理器。
 // GET, POST, PUT, PATCH, HEAD, OPTIONS, DELETE, CONNECT, TRACE。
 func (group *RouterGroup) Any(relativePath string, handlers ...app.HandlerFunc) Router {
 	group.handle(consts.MethodGet, relativePath, handlers)
@@ -93,46 +109,48 @@ func (group *RouterGroup) Any(relativePath string, handlers ...app.HandlerFunc) 
 	group.handle(consts.MethodDelete, relativePath, handlers)
 	group.handle(consts.MethodConnect, relativePath, handlers)
 	group.handle(consts.MethodTrace, relativePath, handlers)
-	return group.returnObj()
+	return group.asObject()
 }
 
-// GET 注册路径及其经由的 GET 处理链，是 Handle("GET", relativePath, handlers) 的快捷方式。
+// GET 注册给定路径需要经由的 GET 处理器，是 Handle("GET", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) GET(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodGet, relativePath, handlers)
 }
 
-// POST 注册路径及其经由的 POST 处理链， 是 Handle("POST", relativePath, handlers) 的快捷方式。
+// POST 注册给定路径需要经由的 POST 处理器， 是 Handle("POST", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) POST(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodPost, relativePath, handlers)
 }
 
-// DELETE 注册路径及其经由的 DELETE 处理链， 是 Handle("DELETE", relativePath, handlers) 的快捷方式。
+// DELETE 注册给定路径需要经由的 DELETE 处理器， 是 Handle("DELETE", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) DELETE(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodDelete, relativePath, handlers)
 
 }
 
-// PATCH 注册路径及其经由的 PATCH 处理链， 是 Handle("PATCH", relativePath, handlers) 的快捷方式。
+// PATCH 注册给定路径需要经由的 PATCH 处理器， 是 Handle("PATCH", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PATCH(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// PUT 注册路径及其经由的 PUT 处理链， 是 Handle("PUT", relativePath, handlers) 的快捷方式。
+// PUT 注册给定路径需要经由的 PUT 处理器， 是 Handle("PUT", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PUT(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// OPTIONS 注册路径及其 OPTIONS 处理链， 是 Handle("OPTIONS", relativePath, handlers) 的快捷方式。
+// OPTIONS 注册给定路径需要 OPTIONS 处处理器 是 Handle("OPTIONS", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) OPTIONS(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// HEAD 注册路径及其经由的 HEAD 处理链， 是 Handle("HEAD", relativePath, handlers) 的快捷方式。
+// HEAD 注册给定路径需要经由的 HEAD 处理器， 是 Handle("HEAD", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) HEAD(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// StaticFile 注册一个提供静态文件处理的路由。
+// StaticFile 提供单个静态文件服务。
+// 用法：
+//
 // StaticFile("favicon.ico", "./resources/favicon.ico")
 func (group *RouterGroup) StaticFile(relativePath string, filepath string) Router {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
@@ -143,25 +161,32 @@ func (group *RouterGroup) StaticFile(relativePath string, filepath string) Route
 	}
 	group.GET(relativePath, handler)
 	group.HEAD(relativePath, handler)
-	return group.returnObj()
+	return group.asObject()
 }
 
+// Static 提供静态文件夹服务。
+// 用法：
+//
+//	router.Static("/static", "/var/www")
 func (group *RouterGroup) Static(relativePath string, root string) Router {
-	//TODO implement me
-	panic("implement me")
+	return group.StaticFS(relativePath, &app.FS{Root: root})
 }
 
+// StaticFS 用法同  Static() ，但可以自定义 app.FS。
 func (group *RouterGroup) StaticFS(relativePath string, fs *app.FS) Router {
-	//TODO implement me
-	panic("implement me")
+	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
+		panic("URL 命名参数不可用于静态文件夹服务")
+	}
+	urlPattern := path.Join(relativePath, "/*filepath")
+
+	// 注册 GET 和 HEAD 处理器
+	handler := fs.NewRequestHandler()
+	group.GET(urlPattern, handler)
+	group.HEAD(urlPattern, handler)
+	return group.asObject()
 }
 
-func (group *RouterGroup) Group(relativePath string, handlers ...app.HandlerFunc) *RouterGroup {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (group *RouterGroup) returnObj() Routers {
+func (group *RouterGroup) asObject() Routers {
 	if group.root {
 		return group.engine
 	}
@@ -172,7 +197,7 @@ func (group *RouterGroup) handle(httpMethod, relativePath string, handlers app.H
 	absolutePath := group.calculateAbsolutePath(relativePath)
 	handlers = group.combineHandlers(handlers)
 	group.engine.addRoute(httpMethod, absolutePath, handlers)
-	return group.returnObj()
+	return group.asObject()
 }
 
 func (group *RouterGroup) calculateAbsolutePath(relativePath string) string {

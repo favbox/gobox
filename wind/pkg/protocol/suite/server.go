@@ -22,7 +22,7 @@ const (
 	HTTP3 = "h3"
 )
 
-// Core 是承诺为协议层提供扩展的核心接口。
+// Core 是协议层为用户提供请求服务扩展的核心接口。
 type Core interface {
 	// IsRunning 报告检查引擎是否正在运行。
 	IsRunning() bool

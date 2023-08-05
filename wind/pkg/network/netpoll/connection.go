@@ -23,6 +23,11 @@ func (c *Conn) ToWindError(err error) error {
 	if errors.Is(err, netpoll.ErrConnClosed) || errors.Is(err, syscall.EPIPE) {
 		return errs.ErrConnectionClosed
 	}
+
+	// 目前只统一读取超时
+	if errors.Is(err, netpoll.ErrReadTimeout) {
+		return errs.ErrTimeout
+	}
 	return err
 }
 

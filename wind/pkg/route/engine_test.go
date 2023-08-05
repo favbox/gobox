@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -320,10 +321,12 @@ func TestIdleTimeout01(t *testing.T) {
 	e.options.IdleTimeout = 1 * time.Second
 	atomic.StoreUint32(&e.status, statusRunning)
 	e.Init()
+	atomic.StoreUint32(&e.status, statusRunning)
 	e.GET("/foo", func(c context.Context, ctx *app.RequestContext) {
 		time.Sleep(10 * time.Millisecond)
 		ctx.String(consts.StatusOK, "ok")
 	})
+
 	conn := mock.NewConn("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	ch := make(chan error)
@@ -331,6 +334,136 @@ func TestIdleTimeout01(t *testing.T) {
 	go func() {
 		<-startCh
 		ch <- e.Serve(context.Background(), conn)
-
 	}()
+	close(startCh)
+	select {
+	case <-ch:
+		t.Errorf("不能这么早返回！应该等待至少1秒。。。")
+	case <-time.Tick(1 * time.Second):
+		fmt.Println("让 mock 连接闲置 1 秒钟啦，所以不会触发 Serve，也不会有结果发送到 ch 中啦")
+		return
+	}
 }
+
+func TestIdleTimeout03(t *testing.T) {
+	e := NewEngine(config.NewOptions(nil))
+	e.options.IdleTimeout = 0
+	e.transport = standard.NewTransporter(e.options)
+	atomic.StoreUint32(&e.status, statusRunning)
+	e.Init()
+	atomic.StoreUint32(&e.status, statusRunning)
+	e.GET("/foo", func(c context.Context, ctx *app.RequestContext) {
+		time.Sleep(50 * time.Millisecond)
+		ctx.String(consts.StatusOK, "ok")
+	})
+
+	conn := mock.NewConn("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n" +
+		"GET /foo HTTP/1.1\r\nHost: google.com\r\nConnection: close\r\n\r\n")
+
+	ch := make(chan error)
+	startCh := make(chan error)
+	go func() {
+		<-startCh
+		ch <- e.Serve(context.Background(), conn)
+	}()
+	close(startCh)
+	select {
+	case err := <-ch:
+		if !errors.Is(err, errs.ErrShortConnection) {
+			t.Errorf("错误应为 ErrShortConnection，但得到了 %s", err)
+		}
+	case <-time.Tick(200 * time.Millisecond):
+		t.Errorf("超时！应在 200ms 内完成")
+	}
+}
+
+func TestEngine_Routes(t *testing.T) {
+	e := NewEngine(config.NewOptions(nil))
+	e.GET("/", handlerTest1)
+	e.GET("/user", handlerTest2)
+	e.GET("/user/:name/*action", handlerTest1)
+	e.GET("/anonymous1", func(c context.Context, ctx *app.RequestContext) {})
+	e.POST("/user", handlerTest2)
+	e.POST("/user/:name/*action", handlerTest2)
+	e.POST("/anonymous2", func(c context.Context, ctx *app.RequestContext) {})
+	group := e.Group("/v1")
+	{
+		group.GET("/user", handlerTest1)
+		group.POST("/login", handlerTest2)
+	}
+	e.Static("/static", ".")
+
+	list := e.Routes()
+
+	assert.DeepEqual(t, 11, len(list))
+
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest1",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/user",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest2",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/user/:name/*action",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest1",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/v1/user",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest1",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/static/*filepath",
+		Handler: "github.com/favbox/gosky/wind/pkg/app.(*fsHandler).handleRequest-fm",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "GET",
+		Path:    "/anonymous1",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.TestEngine_Routes.func1",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "POST",
+		Path:    "/user",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest2",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "POST",
+		Path:    "/user/:name/*action",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest2",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "POST",
+		Path:    "/anonymous2",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.TestEngine_Routes.func2",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "POST",
+		Path:    "/v1/login",
+		Handler: "github.com/favbox/gosky/wind/pkg/route.handlerTest2",
+	})
+	assertRoutePresent(t, list, Route{
+		Method:  "HEAD",
+		Path:    "/static/*filepath",
+		Handler: "github.com/favbox/gosky/wind/pkg/app.(*fsHandler).handleRequest-fm",
+	})
+}
+
+func assertRoutePresent(t *testing.T, gets Routes, want Route) {
+	for _, get := range gets {
+		if get.Path == want.Path && get.Method == want.Method && get.Handler == want.Handler {
+			return
+		}
+	}
+
+	t.Errorf("路由未找到: %v", want)
+}
+
+func handlerTest1(c context.Context, ctx *app.RequestContext) {}
+
+func handlerTest2(c context.Context, ctx *app.RequestContext) {}

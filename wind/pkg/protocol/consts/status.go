@@ -45,7 +45,7 @@ const (
 	StatusMethodNotAllowed             = 405 // RFC 7231, 6.5.5 目标资源不支持该请求方法
 	StatusNotAcceptable                = 406 // RFC 7231, 6.5.6 服务端没发现符合用户代理给定标准的内容
 	StatusProxyAuthRequired            = 407 // RFC 7235, 3.2 需要代理对客户端进行身份验证
-	StatusRequestTimeout               = 408 // RFC 7231, 6.5.7 用于关闭客户端空闲连接时发送的消息
+	StatusRequestTimeout               = 408 // RFC 7231, 6.5.7 用于关闭客户端闲置连接时发送的消息
 	StatusConflict                     = 409 // RFC 7231, 6.5.8 请求与服务器当前状态相冲突
 	StatusGone                         = 410 // RFC 7231, 6.5.9 服务器已永久删除此内容且无转发地址
 	StatusLengthRequired               = 411 // RFC 7231, 6.5.10 Content-Length 标头未定义但服务端需要它

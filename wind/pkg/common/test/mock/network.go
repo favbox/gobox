@@ -2,6 +2,7 @@ package mock
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -9,6 +10,11 @@ import (
 	"github.com/cloudwego/netpoll"
 	errs "github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/network"
+)
+
+var (
+	ErrReadTimeout  = errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "read timeout")
+	ErrWriteTimeout = errs.New(errs.ErrTimeout, errs.ErrorTypePublic, "write timeout")
 )
 
 type Recorder interface {
@@ -178,6 +184,63 @@ func NewConn(source string) *Conn {
 	}
 }
 
+type BrokenConn struct {
+	*Conn
+}
+
+func (c *BrokenConn) Peek(n int) ([]byte, error) {
+	return nil, io.ErrUnexpectedEOF
+}
+
+func (o *BrokenConn) Read(b []byte) (n int, err error) {
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (c *BrokenConn) Flush() error {
+	return errs.ErrConnectionClosed
+}
+
+func NewBrokenConn(source string) *BrokenConn {
+	return &BrokenConn{NewConn(source)}
+}
+
+type OneTimeConn struct {
+	isRead        bool
+	isFlushed     bool
+	contentLength int
+	*Conn
+}
+
+func (o *OneTimeConn) Peek(n int) ([]byte, error) {
+	if o.isRead {
+		return nil, io.EOF
+	}
+	return o.Conn.Peek(n)
+}
+
+func (o *OneTimeConn) Skip(n int) error {
+	if o.isRead {
+		return io.EOF
+	}
+	o.contentLength -= n
+	if o.contentLength == 0 {
+		o.isRead = true
+	}
+	return o.Conn.Skip(n)
+}
+
+func (o *OneTimeConn) Flush() error {
+	if o.isFlushed {
+		return errs.ErrConnectionClosed
+	}
+	o.isFlushed = true
+	return o.Conn.Flush()
+}
+
+func NewOneTimeConn(source string) *OneTimeConn {
+	return &OneTimeConn{isRead: false, isFlushed: false, Conn: NewConn(source), contentLength: len(source)}
+}
+
 // SlowReadConn 模拟慢读取连接。
 type SlowReadConn struct {
 	*Conn
@@ -190,6 +253,18 @@ func (m *SlowReadConn) SetReadTimeout(t time.Duration) error {
 	m.Conn.readTimeout = t
 	return nil
 }
+func (m *SlowReadConn) Peek(i int) ([]byte, error) {
+	b, err := m.zr.Peek(i)
+	if m.readTimeout > 0 {
+		time.Sleep(m.readTimeout)
+	} else {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil || len(b) != i {
+		return nil, ErrReadTimeout
+	}
+	return b, err
+}
 
 func NewSlowReadConn(source string) *SlowReadConn {
 	return &SlowReadConn{Conn: NewConn(source)}
@@ -199,7 +274,7 @@ func SlowReadDialer(addr string) (network.Conn, error) {
 	return NewSlowReadConn(""), nil
 }
 
-// SlowWriteConn 模拟慢写入连接。
+// SlowWriteConn 模拟慢写入(休眠 100 毫秒)连接。
 type SlowWriteConn struct {
 	*Conn
 	writeTimeout time.Duration
@@ -215,9 +290,9 @@ func (m *SlowWriteConn) Flush() error {
 	time.Sleep(100 * time.Millisecond)
 	if err == nil {
 		time.Sleep(m.writeTimeout)
-		return errs.ErrWriteTimeout
+		return ErrWriteTimeout
 	}
-	return nil
+	return err
 }
 
 func NewSlowWriteConn(source string) *SlowWriteConn {

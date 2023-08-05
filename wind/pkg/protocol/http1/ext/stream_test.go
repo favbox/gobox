@@ -63,7 +63,7 @@ func TestChunkedSkipRest(t *testing.T) {
 
 	testChunkedSkipRest(t, "0\r\n\r\n", "")
 	testChunkedSkipRest(t, "0\r\n\r\nHTTP/1.1 / POST", "HTTP/1.1 / POST")
-	testChunkedSkipRest(t, "0\r\nHertz: test\r\nfoo: bar\r\n\r\nHTTP/1.1 / POST", "HTTP/1.1 / POST")
+	testChunkedSkipRest(t, "0\r\nWind: test\r\nfoo: bar\r\n\r\nHTTP/1.1 / POST", "HTTP/1.1 / POST")
 
 	testChunkedSkipRestWithBodySize(t, 5)
 

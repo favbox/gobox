@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/favbox/gosky/wind/internal/bytesconv"
@@ -74,7 +75,7 @@ type ClientOptions struct {
 	// 默认不限时长。
 	MaxConnDuration time.Duration
 
-	// 空闲连接超过此时长后会被关闭。
+	// 闲置连接超过此时长后会被关闭。
 	//
 	// 默认值为 DefaultMaxIdleConnDuration。
 	MaxIdleConnDuration time.Duration
@@ -112,7 +113,7 @@ type ClientOptions struct {
 	// 禁用路径的规范化，可能对代理期望保留原始路径的传入请求有用。
 	DisablePathNormalizing bool
 
-	// 等待一个空闲连接的最大时长。
+	// 等待一个闲置连接的最大时长。
 	//
 	// 默认不等待，立即返回 ErrNoFreeConns。
 	MaxConnWaitTimeout time.Duration
@@ -192,7 +193,7 @@ func (c *HostClient) Close() error {
 	return nil
 }
 
-// CloseIdleConnections 关闭所有之前请求建立而当前空闲而保持 "keep-alive" 状态的连接。
+// CloseIdleConnections 关闭以前建立而当前闲置的长连接。
 // 不会中断当前正在使用的连接。
 func (c *HostClient) CloseIdleConnections() {
 	c.connsLock.Lock()
@@ -214,7 +215,7 @@ func (c *HostClient) closeConn(cc *clientConn) {
 	releaseClientConn(cc)
 }
 
-// ConnectionCount 返回连接池中的空闲连接数量。
+// ConnectionCount 返回连接池中的闲置连接的数量。
 func (c *HostClient) ConnectionCount() (count int) {
 	c.connsLock.Lock()
 	count = len(c.conns)
@@ -222,6 +223,7 @@ func (c *HostClient) ConnectionCount() (count int) {
 	return
 }
 
+// ConnPoolState 返回主机客户端的连接池状态。
 func (c *HostClient) ConnPoolState() config.ConnPoolState {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
@@ -254,8 +256,9 @@ func (c *HostClient) Do(ctx context.Context, req *protocol.Request, resp *protoc
 		err                error
 		canIdempotentRetry bool               // 能否幂等重试
 		isDefaultRetryFunc                    = true
-		attempts           uint               = 0
-		maxAttempts        uint               = 1
+		attempts           uint               = 0 // 当前尝试次数
+		connAttempts       uint               = 0 // 客户端连接尝试次数
+		maxAttempts        uint               = 1 // 最多尝试次数
 		isRequestRetryable client.RetryIfFunc = client.DefaultRetryIf
 	)
 	retryCfg := c.ClientOptions.RetryConfig
@@ -273,17 +276,37 @@ func (c *HostClient) Do(ctx context.Context, req *protocol.Request, resp *protoc
 	atomic.AddInt32(&c.pendingRequests, 1)
 	req.Options().StartRequest()
 	for {
+		select {
+		case <-ctx.Done():
+			req.CloseBodyStream()
+			return ctx.Err()
+		default:
+		}
+
 		canIdempotentRetry, err = c.do(req, resp)
 		// 若无自定义重试且 err == nil，则循环将直接退出。
 		if err == nil && isDefaultRetryFunc {
+			if connAttempts != 0 {
+				hlog.SystemLogger().Warnf("客户端连接尝试次数：%d，网址：%s。"+
+					"这主要是因为对端提前关闭了池中的连接。"+
+					"若该数过高，则表明长连接基本已不可用，"+
+					"尝试把请求改为短链接。\n", connAttempts, req.URI().FullURI())
+			}
 			break
 		}
 
+		// 此连接在连接池时已被对端关闭。
+		//
+		// 这种情况可能发生在闲置的长连接因超时而被服务器关闭。
+		//
+		// Apache 和 Nginx 通常这么做。
+		if canIdempotentRetry && client.DefaultRetryIf(req, resp, err) && errors.Is(err, errs.ErrBadPoolConn) {
+			connAttempts++
+			continue
+		}
+
 		if isDefaultRetryFunc {
-			// canIdempotentRetry 仅在用户未提供自定义重试函数时有效
-			if !canIdempotentRetry {
-				break
-			}
+			break
 		}
 
 		attempts++
@@ -498,7 +521,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 		return
 	}
 
-	// 尝试将空闲连接传递给正在等待的连接
+	// 尝试将闲置连接传递给正在等待的连接
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
 	delivered := false
@@ -528,7 +551,7 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 	cc := acquireClientConn(conn)
 	delivered := w.tryDeliver(cc, nil)
 	if !delivered {
-		// 未送达，返回空闲连接
+		// 未送达，返回闲置连接
 		c.releaseConn(cc)
 	}
 }
@@ -683,7 +706,7 @@ func (c *HostClient) doNonNilReqResp(req *protocol.Request, resp *protocol.Respo
 	if reqTimeout < dialTimeout || dialTimeout == 0 {
 		dialTimeout = reqTimeout
 	}
-	cc, err := c.acquireConn(dialTimeout)
+	cc, inPool, err := c.acquireConn(dialTimeout)
 	// 若获取连接出错，立即返回错误
 	if err != nil {
 		return false, err
@@ -752,14 +775,17 @@ func (c *HostClient) doNonNilReqResp(req *protocol.Request, resp *protocol.Respo
 			return true, err
 		}
 
-		// 仅限于连接被关闭于写入请求时。尝试解析响应并返回。
-		// 此情况下，请求/响应被认为是成功的。
+		// 仅限于写入请求时链接被关闭的时候。尝试解析响应并返回。
+		// 在此情况下，请求/响应被认为是成功的。
 		// 否则，返回先前的错误。
-
 		zr := c.acquireReader(conn)
 		defer zr.Release()
 		if respI.ReadHeaderAndLimitBody(resp, zr, c.MaxResponseBodySize) == nil {
 			return false, nil
+		}
+
+		if inPool {
+			err = errs.ErrBadPoolConn
 		}
 
 		return true, err
@@ -786,6 +812,26 @@ func (c *HostClient) doNonNilReqResp(req *protocol.Request, resp *protocol.Respo
 		resp.Header.DisableNormalizing()
 	}
 	zr := c.acquireReader(conn)
+
+	// errs.ErrBadPoolConn 错误是在 peek 1字节读取失败时返回的，我们实际上预期会有响应。
+	// 通常，这只是由于固有的关闭 keep-alive 产生的竞争，即服务器在客户端写入的同时关闭连接。
+	// 底层的 err 字段通常是 io.EOF 或某种 ECONNRESET 类型的东西，它因平台而异。
+	_, err = zr.Peek(1)
+	if err != nil {
+		zr.Release()
+		c.closeConn(cc)
+		// 池化连接被关闭
+		if inPool && (err == io.EOF || err == syscall.ECONNRESET) {
+			return true, errs.ErrBadPoolConn
+		}
+
+		// 若非池化连接，我们不该重试以避免无限死循环。
+		errNorm, ok := conn.(network.ErrorNormalization)
+		if ok {
+			err = errNorm.ToWindError(err)
+		}
+		return false, err
+	}
 
 	// 此处初始化时用于在 ReadBodyStream 的闭包中传递，
 	// 且该值降载读取响应头后被指派
@@ -876,7 +922,7 @@ func (c *HostClient) preHandleConfig(o *config.RequestOptions) requestConfig {
 	return rc
 }
 
-func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err error) {
+func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, inPool bool, err error) {
 	createConn := false
 	startCleaner := false
 
@@ -905,16 +951,16 @@ func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err
 	c.connsLock.Unlock()
 
 	if cc != nil {
-		return cc, nil
+		return cc, true, nil
 	}
 	if !createConn {
 		if c.MaxConnWaitTimeout <= 0 {
-			return nil, errs.ErrNoFreeConns
+			return nil, true, errs.ErrNoFreeConns
 		}
 
 		timeout := c.MaxConnWaitTimeout
 
-		// 等待空闲连接
+		// 等待一个可用连接
 		tc := timer.AcquireTimer(timeout)
 		defer timer.ReleaseTimer(tc)
 
@@ -935,9 +981,9 @@ func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err
 
 		select {
 		case <-w.ready:
-			return w.conn, w.err
+			return w.conn, true, w.err
 		case <-tc.C:
-			return nil, errs.ErrNoFreeConns
+			return nil, true, errs.ErrNoFreeConns
 		}
 	}
 
@@ -948,11 +994,11 @@ func (c *HostClient) acquireConn(dialTimeout time.Duration) (cc *clientConn, err
 	conn, err := c.dialHostHard(dialTimeout)
 	if err != nil {
 		c.decConnsCount()
-		return nil, err
+		return nil, false, err
 	}
 	cc = acquireClientConn(conn)
 
-	return cc, nil
+	return cc, false, nil
 }
 
 func (c *HostClient) connsCleaner() {
@@ -966,7 +1012,7 @@ func (c *HostClient) connsCleaner() {
 	for {
 		currentTime := time.Now()
 
-		// 确定要关闭的空闲连接。
+		// 确定需要关闭的闲置连接
 		c.connsLock.Lock()
 		conns := c.conns
 		n := len(conns)
@@ -991,13 +1037,13 @@ func (c *HostClient) connsCleaner() {
 		}
 		c.connsLock.Unlock()
 
-		// 关闭空闲连接。
+		// 关闭闲置连接。
 		for i, cc := range scratch {
 			c.closeConn(cc)
 			scratch[i] = nil
 		}
 
-		// 确定是否要停止 connsCleaner
+		// 确定是否要停止连接清理器
 		c.connsLock.Lock()
 		mustStop := c.connsCount == 0
 		if mustStop {

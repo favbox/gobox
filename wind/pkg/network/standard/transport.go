@@ -98,7 +98,7 @@ func (t *transport) serve() (err error) {
 	}
 }
 
-// NewTransporter 创建新的网络传输器实例。
+// NewTransporter 创建标准库网络传输器。
 func NewTransporter(options *config.Options) network.Transporter {
 	return &transport{
 		readBufferSize:   options.ReadBufferSize,

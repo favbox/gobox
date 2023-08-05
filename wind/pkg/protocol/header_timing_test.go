@@ -50,7 +50,7 @@ func BenchmarkHTTPHeaderAdd(b *testing.B) {
 	}
 }
 
-func BenchmarkHertzHeaderAdd(b *testing.B) {
+func BenchmarkWindHeaderAdd(b *testing.B) {
 	wh := new(ResponseHeader)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

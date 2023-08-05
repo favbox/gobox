@@ -230,7 +230,7 @@ func TestDefaultWriter(t *testing.T) {
 			return reqCtx
 		}},
 		mockHandler: func(c context.Context, ctx *app.RequestContext) {
-			ctx.Write([]byte("hello, hertz"))
+			ctx.Write([]byte("hello, wind"))
 			ctx.Flush()
 		},
 	}
@@ -241,7 +241,7 @@ func TestDefaultWriter(t *testing.T) {
 	assert.DeepEqual(t, 0, defaultResponseResult.Len()) // all data is flushed so the buffer length is 0
 	response := protocol.AcquireResponse()
 	resp.Read(response, defaultResponseResult)
-	assert.DeepEqual(t, "hello, hertz", string(response.Body()))
+	assert.DeepEqual(t, "hello, wind", string(response.Body()))
 }
 
 func TestHijackResponseWriter(t *testing.T) {
@@ -262,7 +262,7 @@ func TestHijackResponseWriter(t *testing.T) {
 				IsFinal: &isFinal,
 			})
 
-			ctx.Write([]byte("hello, hertz"))
+			ctx.Write([]byte("hello, wind"))
 			ctx.Flush()
 		},
 	}
@@ -273,7 +273,7 @@ func TestHijackResponseWriter(t *testing.T) {
 	response := protocol.AcquireResponse()
 	resp.Read(response, defaultResponseResult)
 	assert.DeepEqual(t, 0, len(response.Body()))
-	assert.DeepEqual(t, "hello, hertz", buf.String())
+	assert.DeepEqual(t, "hello, wind", buf.String())
 	assert.True(t, isFinal)
 }
 

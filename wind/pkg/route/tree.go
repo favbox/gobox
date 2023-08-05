@@ -16,15 +16,13 @@ import (
 type (
 	kind uint8
 	node struct {
-		kind     kind // 路由类型
-		label    byte // 路由标识符
-		prefix   string
-		parent   *node
-		children children
-		// 原始路径
-		ppath string
-		// 参数名称
-		pnames     []string
+		kind       kind     // 路由类型
+		label      byte     // 路由标识符
+		prefix     string   // 前缀
+		parent     *node    // 父节点
+		children   children // 子节点切片
+		ppath      string   // 原始路径
+		pnames     []string // 参数名称切片
 		handlers   app.HandlersChain
 		paramChild *node
 		anyChild   *node
@@ -39,7 +37,8 @@ type (
 		fullPath string
 	}
 
-	// 路由树
+	// 路由树，一个方法一棵树。
+	// 以路径前缀为节点进行枝叶蔓延。
 	router struct {
 		method        string
 		root          *node
@@ -210,7 +209,7 @@ func (n *node) findChildWithLabel(label byte) *node {
 	return nil
 }
 
-// 将具有指定处理链的路由，添加到该路由器。
+// 添加给定路径——处理链的路由到当前路由器。
 func (r *router) addRoute(path string, h app.HandlersChain) {
 	checkPathValid(path)
 

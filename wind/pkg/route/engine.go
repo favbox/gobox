@@ -347,7 +347,7 @@ func (engine *Engine) Shutdown(ctx context.Context) (err error) {
 
 // Close 关闭路由引擎。
 //
-// 包括底层传输器、HTML 渲染器可能用到的文件监视器。
+// 包括传输器及渲染器可能用到的文件监视器。
 func (engine *Engine) Close() error {
 	if engine.htmlRender != nil {
 		engine.htmlRender.Close()
@@ -355,7 +355,7 @@ func (engine *Engine) Close() error {
 	return engine.transport.Close()
 }
 
-// Serve 提供普通连接服务。通过协议可用的服务器，自动回调 ServeHTTP。
+// Serve 提供普通连接服务。在可用协议的服务过程中，会自动调用请求服务 ServeHTTP。
 func (engine *Engine) Serve(ctx context.Context, conn network.Conn) (err error) {
 	defer func() {
 		errProcess(conn, err)
@@ -398,7 +398,7 @@ func (engine *Engine) Serve(ctx context.Context, conn network.Conn) (err error) 
 	return
 }
 
-// ServeStream 提供流式连接服务。通过协议可用的服务器，自动回调 ServeHTTP。
+// ServeStream 提供流式连接服务。在可用协议的服务过程中，会自动调用请求服务 ServeHTTP。
 func (engine *Engine) ServeStream(ctx context.Context, conn network.StreamConn) (err error) {
 	// ALPN 协议
 	if engine.options.ALPN && engine.options.TLS != nil {
@@ -429,12 +429,7 @@ func (engine *Engine) GetCtxPool() *sync.Pool {
 	return &engine.ctxPool
 }
 
-// ServeHTTP 提供 HTTP 请求服务。
-//
-// 是路由层对协议层的 suite.Core 接口的具体实现：
-//
-//  1. 上游协议服务器如 http1.Server Serve 连接：处理请求 → 回调本函数 → 进行响应。
-//  2. 本函数处理路由：找路由的处理器 → 找到就 Next 业务端处理链 → 找不到就处理错误。
+// ServeHTTP 提供请求服务。在服务过程中，会自动调用用户扩展的 app.HandlerFunc。
 func (engine *Engine) ServeHTTP(c context.Context, ctx *app.RequestContext) {
 	if engine.PanicHandler != nil {
 		defer engine.recover(ctx)
@@ -859,7 +854,7 @@ func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlersChain
 	if handlerName == "" {
 		handlerName = utils.NameOfFunction(handlers.Last())
 	}
-	hlog.SystemLogger().Debugf("Method=%-6s absolutePath=%-25s --> handlerName=%s (num=%d handlers)", httpMethod, absolutePath, handlerName, nHandlers)
+	hlog.SystemLogger().Debugf("方法=%-6s 绝对路径=%-25s --> 处理器名称=%s (%d 个处理器)", httpMethod, absolutePath, handlerName, nHandlers)
 }
 
 func getTransporterName(transporter network.Transporter) (tName string) {

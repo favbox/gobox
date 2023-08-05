@@ -19,7 +19,7 @@ import (
 
 func TestGcBodyStream(t *testing.T) {
 	srv := &http.Server{
-		Addr: ":11001",
+		Addr: "127.0.0.1:11001",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			for range [1024]int{} {
 				w.Write([]byte("hello world\n"))
@@ -58,7 +58,7 @@ func TestGcBodyStream(t *testing.T) {
 
 func TestHostClient_SetMaxConns(t *testing.T) {
 	srv := &http.Server{
-		Addr: ":11002",
+		Addr: "127.0.0.1:11002",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("hello world\n"))
 		}),

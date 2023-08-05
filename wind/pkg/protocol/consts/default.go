@@ -9,7 +9,7 @@ const (
 	// DefaultMaxConnsPerHost 客户端为每个主机建立连接的默认并发连接数。
 	DefaultMaxConnsPerHost = 512
 
-	// DefaultMaxIdleConnDuration 空闲保活连接超过此时长后会被关闭。
+	// DefaultMaxIdleConnDuration 闲置长连接超过此时长后会被关闭。
 	DefaultMaxIdleConnDuration = 10 * time.Second
 
 	// DefaultMaxInMemoryFileSize 定义解析多部分表单使用的内存文件大小，若超此值，则写入磁盘。

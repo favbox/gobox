@@ -51,7 +51,7 @@ var (
 // 基于安全考虑，返回路径不能包含 '/../' 这种在 Fs.Root 之外的子字符串。
 type PathRewriteFunc func(ctx *RequestContext) []byte
 
-// FS 表示为本地文件系统中静态文件提供服务的请求处理器的设置。
+// FS 表示静态文件服务配置项。
 //
 // 不要值拷贝 FS，而要创建实例。
 type FS struct {

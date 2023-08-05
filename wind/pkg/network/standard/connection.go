@@ -40,6 +40,12 @@ func (c *Conn) ToWindError(err error) error {
 	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ENOTCONN) {
 		return errs.ErrConnectionClosed
 	}
+
+	// 统一超时错误
+	if netErr, ok := err.(*net.OpError); ok && netErr.Timeout() {
+		return errs.ErrTimeout
+	}
+
 	return err
 }
 

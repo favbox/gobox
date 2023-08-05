@@ -493,23 +493,39 @@ func (req *Request) RequestURI() []byte {
 	return req.Header.RequestURI()
 }
 
-// Reset 重置请求。
-func (req *Request) Reset() {
-	req.Header.Reset()
-	req.ResetSkipHeader()
-	_ = req.CloseBodyStream()
-
-	req.options = nil
-}
-
 // ResetSkipHeader 重置请求（标头除外）。
 func (req *Request) ResetSkipHeader() {
+	req.resetSkipHeaderAndConn()
+	req.isTLS = false
+}
+
+// 用于长连接重用。
+// 与 ResetSkipHeader 基本一致，但移除了与连接相关的字段：
+// - req.IsTLS
+func (req *Request) resetSkipHeaderAndConn() {
 	req.ResetBody()
 	req.uri.Reset()
 	req.parsedURI = false
 	req.parsedPostArgs = false
 	req.postArgs.Reset()
-	req.isTLS = false
+}
+
+// Reset 清空请求内容。
+func (req *Request) Reset() {
+	req.Header.Reset()
+	req.ResetSkipHeader()
+	req.CloseBodyStream()
+
+	req.options = nil
+}
+
+func (req *Request) ResetWithoutConn() {
+	req.Header.Reset()
+	req.resetSkipHeaderAndConn()
+
+	req.CloseBodyStream()
+
+	req.options = nil
 }
 
 // ResetBody 重置请求的正文。
@@ -530,7 +546,8 @@ func (req *Request) ResetBody() {
 	}
 }
 
-// Scheme 返回请求架构。
+// Scheme 返回请求方案。
+// uri 将在 ServeHTTP 中解析（在用户进程之前），因此不需要进行 uri 是否为空。
 func (req *Request) Scheme() []byte {
 	return req.uri.Scheme()
 }
@@ -788,9 +805,9 @@ func ReleaseRequest(req *Request) {
 
 // NewRequest 根据给定方法、网址和可选正文构造新的请求实例。
 //
-// # 方法默认值是 GET。
+// # 方法为空则默认为 GET。
 //
-// 网址必须为完全限定的 URI，即带有 scheme 和 host，若省略 scheme 则假定为 http。
+// 网址必须为完全限定的 URI，即带有 scheme://host/path，若省略 scheme 则假定为 http。
 //
 // 该方法的协议版本固定为 HTTP/1.1
 func NewRequest(method, url string, body io.Reader) *Request {

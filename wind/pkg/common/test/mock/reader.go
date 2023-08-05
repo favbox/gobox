@@ -3,6 +3,7 @@ package mock
 import (
 	"bufio"
 	"bytes"
+	"io"
 )
 
 // ZeroCopyReader 用于为测试创建的 ZeroCopyReader。
@@ -45,4 +46,34 @@ func (m ZeroCopyReader) ReadBinary(n int) (p []byte, err error) {
 func NewZeroCopyReader(r string) ZeroCopyReader {
 	br := bufio.NewReaderSize(bytes.NewBufferString(r), len(r))
 	return ZeroCopyReader{br}
+}
+
+type EOFReader struct{}
+
+func (e *EOFReader) Peek(n int) ([]byte, error) {
+	return []byte{}, io.EOF
+}
+
+func (e *EOFReader) Skip(n int) error {
+	return nil
+}
+
+func (e *EOFReader) Release() error {
+	return nil
+}
+
+func (e *EOFReader) Len() int {
+	return 0
+}
+
+func (e *EOFReader) ReadByte() (byte, error) {
+	return ' ', io.EOF
+}
+
+func (e *EOFReader) ReadBinary(n int) (p []byte, err error) {
+	return p, io.EOF
+}
+
+func (e *EOFReader) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
 }

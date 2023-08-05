@@ -68,7 +68,7 @@ func DefaultRetryIf(req *protocol.Request, resp *protocol.Response, err error) b
 
 	// 若服务器在发送相应之前关闭了连接，请重试非幂等请求。
 	//
-	// 若服务器在超时关闭空闲的保活连接时，则可能出现这种情况。
+	// 若服务器在超时时关闭闲置长连接，则可能出现这种情况。
 	//
 	// Apache 和 Nginx 通常会这样做。
 	if err == io.EOF {

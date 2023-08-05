@@ -160,6 +160,9 @@ func LimitedReaderSize(r io.Reader) int64 {
 
 // WriteBodyFixedSize 从 r 中拷贝 size 个字节到 w。
 func WriteBodyFixedSize(w network.Writer, r io.Reader, size int64) error {
+	if size == 0 {
+		return nil
+	}
 	if size > consts.MaxSmallFileSize {
 		if err := w.Flush(); err != nil {
 			return err

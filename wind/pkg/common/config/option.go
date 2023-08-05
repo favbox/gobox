@@ -37,7 +37,7 @@ type Options struct {
 	// WriteTimeout 是网络库写入的超时时间，默认为 0，即永不超时。
 	WriteTimeout time.Duration
 
-	// IdleTime 是连接的空闲时间，超时则关闭。 默认为 ReadTimeout 即 3 分钟，0 代表永不超时。
+	// IdleTime 是连接的闲置超时，超时则关闭。 默认为 ReadTimeout 即 3 分钟，0 代表永不超时。
 	IdleTimeout time.Duration
 
 	// 是否将 /foo/ 重定向到 /foo，默认重定向。

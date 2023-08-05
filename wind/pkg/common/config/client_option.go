@@ -11,7 +11,7 @@ import (
 
 // ConnPoolState 客户端连接池的状态结构体。
 type ConnPoolState struct {
-	// 连接池的连接数量，即空闲连接数量。
+	// 连接池的连接数量，这些连接是闲置连接。
 	PoolConnNum int
 	// 总连接数。
 	TotalConnNum int
@@ -40,17 +40,17 @@ type ClientOptions struct {
 	// 每个主机的最大连接数
 	MaxConnsPerHost int
 
-	// 空闲连接超过此时长后会被关闭。
+	// 闲置连接超过此时长后会被关闭。
 	//
 	// 默认值为 DefaultMaxIdleConnDuration。
 	MaxIdleConnDuration time.Duration
 
-	// Keep-alive 保活连接超过此时长会被关闭。
+	// Keep-alive 长连接超过此时长会被关闭。
 	//
 	// 默认不限时长。
 	MaxConnDuration time.Duration
 
-	// 等待一个空闲连接的最大时长。
+	// 等待一个闲置连接的最大时长。
 	//
 	// 默认不等待，立即返回 ErrNoFreeConns。
 	MaxConnWaitTimeout time.Duration

@@ -26,10 +26,10 @@ import (
 )
 
 var (
-	errIdleTimeout     = errs.New(errs.ErrIdleTimeout, errs.ErrorTypePublic, nil)
-	errUnexpectedEOF   = errs.NewPublic(io.ErrUnexpectedEOF.Error() + " when reading request")
 	errHijacked        = errs.New(errs.ErrHijacked, errs.ErrorTypePublic, nil)
-	errShortConnection = errs.New(errs.ErrShortConnection, errs.ErrorTypePublic, "服务器将关闭连接")
+	errIdleTimeout     = errs.New(errs.ErrIdleTimeout, errs.ErrorTypePrivate, nil)
+	errShortConnection = errs.New(errs.ErrShortConnection, errs.ErrorTypePublic, "服务器即将关闭该连接")
+	errUnexpectedEOF   = errs.NewPublic(io.ErrUnexpectedEOF.Error() + " when reading request")
 )
 
 // NewServer 创建新的 HTTP/1.1 服务器。
@@ -148,22 +148,21 @@ func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 			zr = ctx.GetReader()
 		}
 
-		// 若为保活链接，则尝试读取在空闲时间内读取前面几个字节。
+		// 若为长链接，则尝试在闲置超时前读取前几个字节。
 		if connRequestNum > 1 {
-			_ = ctx.GetConn().SetReadTimeout(s.IdleTimeout)
+			ctx.GetConn().SetReadTimeout(s.IdleTimeout)
 
 			_, err = zr.Peek(4)
-			// 这不是第一个请求，我们还未读取新请求的第一个字节。
-			// 这意味着它只是一个保活连接的关闭，要么是远端关闭了它，
-			// 要么是由于我们这边的读取超时。无论哪种方式，只要关闭连接，
-			// 都不会返回任何错误响应。
+			// 这不是第一个请求，我们还未读取新请求的前几个字节。
+			// 这意味着只是关闭了一个长连接，要么是远端关闭了它， 要么是由于我们这边的读取超时。
+			// 无论是哪种方式，只需关闭连接，都不要返回任何错误响应。
 			if err != nil {
 				err = errIdleTimeout
 				return
 			}
 
-			// 重置后续请求的真实读取超时时长
-			_ = ctx.GetConn().SetReadTimeout(s.ReadTimeout)
+			// 为后续请求重置真实的读取超时时长
+			ctx.GetConn().SetReadTimeout(s.ReadTimeout)
 		}
 
 		// 跟踪器记录请求开始和结束信息。

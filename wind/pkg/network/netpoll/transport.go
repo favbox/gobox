@@ -50,7 +50,7 @@ func (t *transport) ListenAndServe(onReq network.OnData) (err error) {
 	opts := []netpoll.Option{
 		netpoll.WithIdleTimeout(t.keepAliveTimeout),
 		netpoll.WithOnPrepare(func(conn netpoll.Connection) context.Context {
-			// 设置准备期间的读写超时时长
+			// 设置准备期间的读写超时
 			_ = conn.SetReadTimeout(t.readTimeout)
 			if t.writeTimeout > 0 {
 				_ = conn.SetWriteTimeout(t.writeTimeout)
@@ -112,7 +112,7 @@ func (t *transport) Shutdown(ctx context.Context) error {
 	return t.eventLoop.Shutdown(ctx)
 }
 
-// NewTransporter 创建新的网络传输器实例。
+// NewTransporter 创建 netpoll 网络传输器。
 func NewTransporter(options *config.Options) network.Transporter {
 	return &transport{
 		RWMutex:          sync.RWMutex{},
