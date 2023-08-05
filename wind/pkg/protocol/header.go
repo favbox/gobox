@@ -1529,7 +1529,7 @@ func (h *ResponseHeader) SetHeaderLength(length int) {
 	h.headerLength = length
 }
 
-// SetNoDefaultContentType 设置是否不用默认内容类型。
+// SetNoDefaultContentType 设置不用默认的内容类型。
 func (h *ResponseHeader) SetNoDefaultContentType(b bool) {
 	h.noDefaultContentType = b
 }

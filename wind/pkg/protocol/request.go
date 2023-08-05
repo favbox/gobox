@@ -157,7 +157,7 @@ func parseBasicAuth(auth []byte) (username, password string, ok bool) {
 	return cs[:s], cs[s+1:], true
 }
 
-// Body 返回请求的正文。
+// Body 返回请求的正文字节。
 func (req *Request) Body() []byte {
 	body, _ := req.BodyE()
 	return body

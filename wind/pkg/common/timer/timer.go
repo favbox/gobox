@@ -1,6 +1,3 @@
-// Package timer 该包源自 fasthttp v1.36.0
-//
-// 提供计时器。
 package timer
 
 import (
