@@ -16,6 +16,7 @@ var (
 	_ Render = String{}
 )
 
+// 设置响应的内容类型。
 func writeContentType(resp *protocol.Response, value string) {
 	resp.Header.SetContentType(value)
 }

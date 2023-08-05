@@ -207,7 +207,7 @@ func TestEngine_Unescape(t *testing.T) {
 	}
 
 	for _, tr := range testRoutes {
-		w := doRequest(e, consts.MethodGet, tr.route+"?key="+tr.key)
+		w := performRequest(e, consts.MethodGet, tr.route+"?key="+tr.key)
 		assert.DeepEqual(t, consts.StatusOK, w.Code)
 	}
 }
@@ -253,7 +253,7 @@ func TestEngine_UnescapeRaw(t *testing.T) {
 		{"/info/slash%%%%2Fgordon/project/Project%%%%20%231", "project", "Project%%%%20%231"},
 	}
 	for _, tr := range testRoutes {
-		w := doRequest(e, http.MethodGet, tr.route+"?key="+tr.key)
+		w := performRequest(e, http.MethodGet, tr.route+"?key="+tr.key)
 		assert.DeepEqual(t, consts.StatusOK, w.Code)
 		assert.DeepEqual(t, tr.want, w.Body.String())
 	}

@@ -201,6 +201,11 @@ func (resp *Response) ConnectionClose() bool {
 	return resp.Header.ConnectionClose()
 }
 
+// SetConnectionClose 设置响应的连接关闭标头。
+func (resp *Response) SetConnectionClose() {
+	resp.Header.SetConnectionClose(true)
+}
+
 // ConstructBodyStream 同时设置响应的主体字节缓冲区和流。
 func (resp *Response) ConstructBodyStream(body *bytebufferpool.ByteBuffer, bodyStream io.Reader) {
 	resp.body = body
@@ -355,11 +360,6 @@ func (resp *Response) SetBodyStreamNoReset(bodyStream io.Reader, bodySize int) {
 func (resp *Response) SetBodyString(body string) {
 	_ = resp.CloseBodyStream()
 	resp.BodyBuffer().SetString(body)
-}
-
-// SetConnectionClose 设置响应的连接关闭标头。
-func (resp *Response) SetConnectionClose() {
-	resp.Header.SetConnectionClose(true)
 }
 
 // SetMaxKeepBodySize 设置响应正文的最大保留字节数。

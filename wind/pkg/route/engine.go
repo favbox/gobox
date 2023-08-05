@@ -498,8 +498,8 @@ func (engine *Engine) ServeHTTP(c context.Context, ctx *app.RequestContext) {
 	// 请求至此，说明无用户处理器则用
 	ctx.SetHandlers(engine.allNoRoute)
 
-	// 然后处理 400 错误的路由
-	serveError(c, ctx, consts.StatusNotFound, default400Body)
+	// 然后处理 404 错误的路由
+	serveError(c, ctx, consts.StatusNotFound, default404Body)
 }
 
 // GetTracer 获取链路跟踪控制器。

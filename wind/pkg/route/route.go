@@ -130,17 +130,17 @@ func (group *RouterGroup) DELETE(relativePath string, handlers ...app.HandlerFun
 
 // PATCH 注册给定路径需要经由的 PATCH 处理器， 是 Handle("PATCH", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PATCH(relativePath string, handlers ...app.HandlerFunc) Router {
-	return group.handle(consts.MethodHead, relativePath, handlers)
+	return group.handle(consts.MethodPatch, relativePath, handlers)
 }
 
 // PUT 注册给定路径需要经由的 PUT 处理器， 是 Handle("PUT", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PUT(relativePath string, handlers ...app.HandlerFunc) Router {
-	return group.handle(consts.MethodHead, relativePath, handlers)
+	return group.handle(consts.MethodPut, relativePath, handlers)
 }
 
 // OPTIONS 注册给定路径需要 OPTIONS 处处理器 是 Handle("OPTIONS", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) OPTIONS(relativePath string, handlers ...app.HandlerFunc) Router {
-	return group.handle(consts.MethodHead, relativePath, handlers)
+	return group.handle(consts.MethodOptions, relativePath, handlers)
 }
 
 // HEAD 注册给定路径需要经由的 HEAD 处理器， 是 Handle("HEAD", relativePath, handlers) 的快捷方式。

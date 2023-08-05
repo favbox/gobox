@@ -149,9 +149,14 @@ func (h *RequestHeader) collectCookies() {
 	h.cookiesCollected = true
 }
 
-// ConnectionClose 返回标头中是否设置了 'Connection: close'。
+// ConnectionClose 返回请求标头中是否设置了 'Connection: close'。
 func (h *RequestHeader) ConnectionClose() bool {
 	return h.connectionClose
+}
+
+// SetConnectionClose 设置响应标头 'Connection: close'。
+func (h *ResponseHeader) SetConnectionClose(close bool) {
+	h.connectionClose = close
 }
 
 // ContentLength 返回请求头中内容长度标头的值。
@@ -1011,7 +1016,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	return append(dst, bytestr.StrCRLF...)
 }
 
-// ConnectionClose 返回连接是否关闭，即是否设置了 'Connection: close' 标头。
+// ConnectionClose 汇报响应标头是否设置了 'Connection: close'。
 func (h *ResponseHeader) ConnectionClose() bool {
 	return h.connectionClose
 }
@@ -1442,11 +1447,6 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	}
 
 	h.h = setArgBytes(h.h, key, value, ArgsHasValue)
-}
-
-// SetConnectionClose 设置连接关闭响应头。
-func (h *ResponseHeader) SetConnectionClose(close bool) {
-	h.connectionClose = close
 }
 
 // SetContentEncoding 设置内容编码响应头。

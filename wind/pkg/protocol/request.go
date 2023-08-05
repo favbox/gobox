@@ -255,7 +255,7 @@ func (req *Request) CloseBodyStream() error {
 	return err
 }
 
-// ConnectionClose 返回请求头是否已设置 'Connection: close'。
+// ConnectionClose 汇报请求标头是否设置了 'Connection: close'。
 func (req *Request) ConnectionClose() bool {
 	return req.Header.ConnectionClose()
 }

@@ -37,6 +37,7 @@ func (r *ResponseRecorder) Header() *protocol.ResponseHeader {
 	return m
 }
 
+// Write 实现 io.Writer。缓冲数据 p 会被写入 Body。
 func (r *ResponseRecorder) Write(p []byte) (int, error) {
 	if !r.wroteHeader {
 		r.WriteHeader(consts.StatusOK)
@@ -47,6 +48,7 @@ func (r *ResponseRecorder) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// WriteString 实现 io.StringWriter。将 s 写入 Body。
 func (r *ResponseRecorder) WriteString(s string) (int, error) {
 	if !r.wroteHeader {
 		r.WriteHeader(consts.StatusOK)
@@ -57,6 +59,7 @@ func (r *ResponseRecorder) WriteString(s string) (int, error) {
 	return len(s), nil
 }
 
+// WriteHeader 发送给定状态码的 HTTP 响应标头。
 func (r *ResponseRecorder) WriteHeader(code int) {
 	if r.wroteHeader {
 		return
@@ -69,6 +72,7 @@ func (r *ResponseRecorder) WriteHeader(code int) {
 	r.wroteHeader = true
 }
 
+// Flush 实现 http.Flusher。要测试 Flush 是否已被调用，请看 Flushed。
 func (r *ResponseRecorder) Flush() {
 	if !r.wroteHeader {
 		r.WriteHeader(consts.StatusOK)
@@ -76,20 +80,30 @@ func (r *ResponseRecorder) Flush() {
 	r.Flushed = true
 }
 
+// Result 返回处理器生成的结果。
+//
+// 返回的响应至少填充了状态码、标头、正文和可选地挂车。
+// 未来可能会填充更多的字段，因此调用方不应在测试中 DeepEqual 结果。
+//
+// Response.Header 是第一次写入调用时的标头快照，若处理器从未写入，则是此快照。
+//
+// Response.Body 保证为非零，Body.Read 调用保证不会返回 io.EOF 以外的任何错误。
+//
+// Result 只能在处理器完成后方可调用。
 func (r *ResponseRecorder) Result() *protocol.Response {
 	if r.result != nil {
 		return r.result
 	}
 
-	res := new(protocol.Response)
+	resp := new(protocol.Response)
 	h := r.Header()
-	h.CopyTo(&res.Header)
+	h.CopyTo(&resp.Header)
 	if r.Body != nil {
 		b := r.Body.Bytes()
-		res.SetBody(b)
-		res.Header.SetContentLength(len(b))
+		resp.SetBody(b)
+		resp.Header.SetContentLength(len(b))
 	}
 
-	r.result = res
-	return res
+	r.result = resp
+	return resp
 }

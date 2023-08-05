@@ -16,7 +16,7 @@ type header struct {
 	Value string
 }
 
-func doRequest(e *Engine, method, path string, headers ...header) *httptest.ResponseRecorder {
+func performRequest(e *Engine, method, path string, headers ...header) *httptest.ResponseRecorder {
 	// 上下文
 	ctx := e.ctxPool.Get().(*app.RequestContext)
 	ctx.HTMLRender = e.htmlRender

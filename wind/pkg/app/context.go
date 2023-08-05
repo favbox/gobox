@@ -410,6 +410,27 @@ func (ctx *RequestContext) HTML(code int, name string, obj any) {
 	ctx.Render(code, instance)
 }
 
+// JSON 序列化给定的结构体以 json 形式写入响应正文。
+//
+// 同时会更新状态码并将 Content-Type 自动设置为 "application/json"。
+func (ctx *RequestContext) JSON(code int, obj any) {
+	ctx.Render(code, render.JSONRender{Data: obj})
+}
+
+// PureJSON 序列化给定的结构体以纯 json 形式写入响应正文。
+//
+// 不同于 JSON，不会用 unicode 实体替换特殊的 html 字符。
+func (ctx *RequestContext) PureJSON(code int, obj any) {
+	ctx.Render(code, render.PureJSON{Data: obj})
+}
+
+// IndentedJSON 序列化给定的结构体以带缩进的 json 形式写入响应正文。
+//
+// 它也会自动将 Content-Type 设置为 "application/json"。
+func (ctx *RequestContext) IndentedJSON(code int, obj any) {
+	ctx.Render(code, render.IndentedJSON{Data: obj})
+}
+
 // Query 返回给定 key 的查询值，否则返回空白字符串 `""`。
 //
 // 示例：
@@ -468,6 +489,11 @@ func (ctx *RequestContext) RemoteAddr() net.Addr {
 		return zeroTCPAddr
 	}
 	return addr
+}
+
+// GetHeader 获取请求标头中给定键的值。
+func (ctx *RequestContext) GetHeader(key string) []byte {
+	return ctx.Request.Header.Peek(key)
 }
 
 // bodyAllowedForStatus 拷贝自 http.bodyAllowedForStatus，
