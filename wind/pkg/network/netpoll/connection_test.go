@@ -70,7 +70,6 @@ type mockConn struct {
 }
 
 func (m *mockConn) SetWriteTimeout(timeout time.Duration) error {
-	// TODO implement me
 	panic("implement me")
 }
 

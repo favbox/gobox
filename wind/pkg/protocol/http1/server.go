@@ -73,6 +73,7 @@ type Server struct {
 	eventStackPool *sync.Pool
 }
 
+// Serve 提供连接服务。
 func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 	var (
 		zr network.Reader
@@ -129,8 +130,7 @@ func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 		s.Core.GetCtxPool().Put(ctx)
 	}()
 
-	// TODO  HTML 渲染器
-	//ctx.HTMLRender = s.HTMLRender
+	ctx.HTMLRender = s.HTMLRender
 	ctx.SetConn(conn)
 	ctx.Request.SetIsTLS(s.TLS != nil)
 	ctx.SetEnableTrace(s.EnableTrace)
@@ -274,7 +274,7 @@ func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 			})
 		}
 
-		// 处理请求。
+		// ⭐️ 处理请求。
 		//
 		// 注意：所有的中间件和业务处理器都将在此执行。
 		// 此时，请求已被解析，路由也已匹配。
@@ -376,8 +376,8 @@ func (s Server) Serve(c context.Context, conn network.Conn) (err error) {
 			return errShortConnection
 		}
 
-		// 返回网络层进行处罚。
-		// 目前，只有 netpoll 的网络模式由此特性。
+		// 返回网络层进行触发。
+		// 目前，只有 netpoll 的网络模式由此特性，标准库的 IdleTimeout 赋值为 0 时会被改为写 -1。
 		if s.IdleTimeout == 0 {
 			return
 		}
@@ -414,16 +414,12 @@ func writeErrorResponse(zw network.Writer, ctx *app.RequestContext, serverName [
 }
 
 func writeResponse(ctx *app.RequestContext, w network.Writer) error {
-	// 若连接已被劫持，则跳过默认响应的写入逻辑
+	// 若连接已被劫持，则跳过默认响应的写入逻辑由其自己处理
 	if ctx.Response.GetHijackWriter() != nil {
 		return ctx.Response.GetHijackWriter().Finalize()
 	}
 
 	err := resp.Write(&ctx.Response, w)
-	if err != nil {
-		return err
-	}
-
 	return err
 }
 

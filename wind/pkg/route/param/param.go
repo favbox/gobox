@@ -8,7 +8,7 @@ type Param struct {
 	Value string
 }
 
-// Params 路由参数，有序。
+// Params 路由参数切片，有序。
 type Params []Param
 
 // Get 返回键与指定名称匹配的第一个参数的值。

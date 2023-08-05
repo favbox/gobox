@@ -4,11 +4,14 @@ import (
 	"context"
 	"io"
 	"mime/multipart"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/favbox/gosky/wind/internal/bytesconv"
 	"github.com/favbox/gosky/wind/internal/bytestr"
+	"github.com/favbox/gosky/wind/pkg/app/server/render"
 	"github.com/favbox/gosky/wind/pkg/common/errors"
 	"github.com/favbox/gosky/wind/pkg/common/tracer/traceinfo"
 	"github.com/favbox/gosky/wind/pkg/network"
@@ -18,11 +21,13 @@ import (
 	"github.com/favbox/gosky/wind/pkg/route/param"
 )
 
+var zeroTCPAddr = &net.TCPAddr{IP: net.IPv4zero}
+
 type Handler interface {
 	ServeHTTP()
 }
 
-// RequestContext 表示一个请求的上下文信息。
+// RequestContext 表示一个请求上下文。
 type RequestContext struct {
 	conn     network.Conn
 	Request  protocol.Request
@@ -31,10 +36,11 @@ type RequestContext struct {
 	// 是附加到所有使用该上下文的处理器/中间件的错误列表。
 	Errors errors.ErrorChain
 
-	Params   param.Params
-	handlers HandlersChain
-	fullPath string
-	index    int8 // 该请求处理链的当前索引
+	Params     param.Params
+	handlers   HandlersChain
+	fullPath   string
+	index      int8 // 该请求处理链的当前索引
+	HTMLRender render.HTMLRender
 
 	// 该互斥锁用于保护 Keys 映射。
 	mu sync.RWMutex
@@ -197,10 +203,12 @@ func (ctx *RequestContext) SetEnableTrace(enable bool) {
 	ctx.enableTrace = enable
 }
 
+// SetClientIPFunc 设置获取客户端 IP 的自定义函数。
 func (ctx *RequestContext) SetClientIPFunc(fn ClientIP) {
 	ctx.clientIPFunc = fn
 }
 
+// SetFormValueFunc 设置获取表单值的自定义函数。
 func (ctx *RequestContext) SetFormValueFunc(f FormValueFunc) {
 	ctx.formValueFunc = f
 }
@@ -374,6 +382,107 @@ func (ctx *RequestContext) redirect(uri []byte, statusCode int) {
 	ctx.Response.SetStatusCode(statusCode)
 }
 
+// Render 写入响应标头并调用 render.Render 来渲染数据。
+func (ctx *RequestContext) Render(code int, r render.Render) {
+	ctx.SetStatusCode(code)
+
+	if !bodyAllowedForStatus(code) {
+		r.WriteContentType(&ctx.Response)
+		return
+	}
+
+	if err := r.Render(&ctx.Response); err != nil {
+		panic(err)
+	}
+}
+
+// String 以字符串形式渲染给定格式的字符串，并写入状态码。
+func (ctx *RequestContext) String(code int, format string, values ...any) {
+	ctx.Render(code, render.String{Format: format, Data: values})
+}
+
+// HTML 渲染给定文件名的 HTML 模板。
+//
+// 同时会更新状态码并将 Content-Type 自动置为 "text/html"。
+func (ctx *RequestContext) HTML(code int, name string, obj any) {
+	instance := ctx.HTMLRender.Instance(name, obj)
+	ctx.Render(code, instance)
+}
+
+// Query 返回给定 key 的查询值，否则返回空白字符串 `""`。
+//
+// 示例：
+//
+//	GET /path?id=123&name=Mike&value=
+//		c.Query("id") == "123"
+//		c.Query("name") == "Mike"
+//		c.Query("value") == ""
+//		c.Query("wtf") == ""
+func (ctx *RequestContext) Query(key string) string {
+	value, _ := ctx.GetQuery(key)
+	return value
+}
+
+// DefaultQuery 返回指定 key 的查询值，若 key 不存在则返回默认值 defaultValue。
+func (ctx *RequestContext) DefaultQuery(key, defaultValue string) string {
+	if value, ok := ctx.GetQuery(key); ok {
+		return value
+	}
+	return defaultValue
+}
+
+// GetQuery 返回指定 key 的查询值。
+//
+// 若存在则返回 `(value, true)` （哪怕值为空白字符串），否则返回 `("", false)`
+// 示例：
+//
+// GET/?name=Mike&lastname=
+// ("Mike", true) == c.GetQuery("name)
+// ("", false) == c.GetQuery("id)
+// ("", true) == c.GetQuery("lastname)
+func (ctx *RequestContext) GetQuery(key string) (string, bool) {
+	return ctx.QueryArgs().PeekExists(key)
+}
+
+// Param 返回指定 key 的 路由参数的值。
+// 它是 ctx.Params.ByName(key) 的快捷键。
+//
+//	router.GET("/user/:id", func(ctx *app.RequestContext) {
+//		// GET 请求 /user/mike
+//		id := ctx.Param("id") // id == "mike"
+//	})
+func (ctx *RequestContext) Param(key string) string {
+	return ctx.Params.ByName(key)
+}
+
+// RemoteAddr 获取客户端的网址。
+//
+// 若为空则返回 zeroTCPAddr。
+func (ctx *RequestContext) RemoteAddr() net.Addr {
+	if ctx.conn == nil {
+		return zeroTCPAddr
+	}
+	addr := ctx.conn.RemoteAddr()
+	if addr != nil {
+		return zeroTCPAddr
+	}
+	return addr
+}
+
+// bodyAllowedForStatus 拷贝自 http.bodyAllowedForStatus，
+// 用于报告给定的响应状态代码是否允许响应正文。
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == consts.StatusNoContent:
+		return false
+	case status == consts.StatusNotModified:
+		return false
+	}
+	return true
+}
+
 func getRedirectStatusCode(statusCode int) int {
 	if statusCode == consts.StatusMovedPermanently ||
 		statusCode == consts.StatusFound ||
@@ -386,14 +495,14 @@ func getRedirectStatusCode(statusCode int) int {
 }
 
 type (
-	// ClientIP 自定义获取客户端 IP 的函数
+	// ClientIP 是获取获取客户端 IP 的自定义函数。
 	ClientIP        func(ctx *RequestContext) string
 	ClientIPOptions struct {
-		RemoteIPHeaders []string
-		TrustedProxies  map[string]bool
+		RemoteIPHeaders []string        // 客户端 IP 标头名称
+		TrustedProxies  map[string]bool // 可信代理
 	}
 
-	// FormValueFunc 自定义获取表单值的函数
+	// FormValueFunc 是获取表单值的自定义函数。
 	FormValueFunc func(*RequestContext, string) []byte
 )
 
@@ -422,11 +531,55 @@ var defaultClientIPOptions = ClientIPOptions{
 }
 var defaultClientIP = ClientIPWithOption(defaultClientIPOptions)
 
-// ClientIPWithOption 用于生成 ClientIP 函数，并有 engine.SetClientIPFunc 设置。
+// ClientIPWithOption 用于生成自定义 ClientIP 函数，并由 engine.SetClientIPFunc 设置。
 func ClientIPWithOption(opts ClientIPOptions) ClientIP {
 	return func(ctx *RequestContext) string {
-		return ""
+		remoteIPHeaders := opts.RemoteIPHeaders
+		trustedProxies := opts.TrustedProxies
+
+		remoteIP, _, err := net.SplitHostPort(strings.TrimSpace(ctx.RemoteAddr().String()))
+		if err != nil {
+			return ""
+		}
+		trusted := isTrustedProxy(trustedProxies, remoteIP)
+		if trusted {
+			for _, headerName := range remoteIPHeaders {
+				ip, valid := validateHeader(trustedProxies, ctx.Request.Header.Get(headerName))
+				if valid {
+					return ip
+				}
+			}
+		}
+
+		return remoteIP
 	}
+}
+
+// 解析 X-Real-IP 和 X-Forwarded-For 标头并返回初始客户端 IP 和不受信任的 IP。
+func validateHeader(trustedProxies map[string]bool, ips string) (clientIP string, valid bool) {
+	if ips == "" {
+		return "", false
+	}
+	items := strings.Split(ips, ",")
+	for i := len(items) - 1; i >= 0; i-- {
+		ipStr := strings.TrimSpace(items[i])
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			break
+		}
+
+		// X-Forwarded-For 由代理追加
+		// 按相反顺序检查 IP，并在找到不受信任的代理时停止
+		if i == 0 || (!isTrustedProxy(trustedProxies, ipStr)) {
+			return ipStr, true
+		}
+	}
+	return "", false
+}
+
+// 基于可信代理判断给定的 IP 地址是否可信。
+func isTrustedProxy(trustedProxies map[string]bool, remoteIP string) bool {
+	return trustedProxies[remoteIP]
 }
 
 // NewContext 创建一个指定初始最大路由参数的无请求/响应信息的纯粹上下文。

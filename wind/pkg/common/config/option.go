@@ -13,11 +13,11 @@ import (
 const (
 	defaultKeepAliveTimeout   = 1 * time.Minute
 	defaultReadTimeout        = 3 * time.Minute
-	defaultAddr               = ":8888"
+	defaultWaitExitTimeout    = 5 * time.Second
 	defaultNetwork            = "tcp"
+	defaultAddr               = ":8888"
 	defaultBasePath           = "/"
 	defaultMaxRequestBodySize = 4 * 1024 * 1024
-	defaultWaitExitTimeout    = 5 * time.Second
 	defaultReadBufferSize     = 4 * 1024
 )
 
@@ -28,18 +28,16 @@ type Option struct {
 
 // Options 是配置项的结构体。
 type Options struct {
-	// 长连接超时时长，默认 1 分钟。
-	// 注意，通常无需关心该值，关心 IdleTimeout 即可。
+	// KeepAliveTimeout 是长连接的超时时间，默认 1 分钟，通常无需关心，仅需关心 IdleTimeout。
 	KeepAliveTimeout time.Duration
 
-	// 底层库读取的超时时间，默认 3 分钟，0 代表永不超时。
+	// ReadTimeout 是网络库读取的超时时间，默认 3 分钟，0 代表永不超时。
 	ReadTimeout time.Duration
 
-	// 底层库写入的超时时间，默认为 0，即永不超时。
+	// WriteTimeout 是网络库写入的超时时间，默认为 0，即永不超时。
 	WriteTimeout time.Duration
 
-	// 当 IdleTimeout 期间无请求时，服务器将关闭此连接。
-	// 默认为 ReadTimeout，0 代表永不超时。
+	// IdleTime 是连接的空闲时间，超时则关闭。 默认为 ReadTimeout 即 3 分钟，0 代表永不超时。
 	IdleTimeout time.Duration
 
 	// 是否将 /foo/ 重定向到 /foo，默认重定向。
@@ -48,35 +46,35 @@ type Options struct {
 	// 将 /FOO 和 /..//FOO 重定向到 /foo，默认不重定向。
 	RedirectFixedPath bool
 
-	// 是否处理请求方法不允许时使用可用的替代方法
+	// 请求方法不允许时，使用替代方法的处理器。
 	HandleMethodNotAllowed bool
 
-	// 用 url.RawPath 来查找参数。
+	// 使用原始未转义的路径。
 	UseRawPath bool
 
-	// 移除额外的斜杠，以从URL中解析参数。
+	// 移除额外的斜杠。
 	RemoveExtraSlash bool
 
-	// 是否不转义路径值，默认不转义。
+	// 不转义路径值，默认不转义。
 	UnescapePathValues bool
 
-	MaxRequestBodySize           int           // 最大请求正文字节数
-	MaxKeepBodySize              int           // 最大保留正文字节数
-	GetOnly                      bool          // 是否仅支持 GET 请求
-	DisableKeepalive             bool          // 是否禁用长连接
-	DisablePreParseMultipartForm bool          // 是否不预先解析多部分表单
-	StreamRequestBody            bool          // 是否流式处理请求正文
-	NoDefaultServerHeader        bool          // 是否不要默认的服务器名称标头
-	DisablePrintRoute            bool          // 是否禁止打印路由
+	MaxRequestBodySize           int           // 正文的最大请求字节数，默认 4MB
+	MaxKeepBodySize              int           // 正文的最大保留字节数，默认 4MB
+	GetOnly                      bool          // 是否仅支持 GET 请求，默认否
+	DisableKeepalive             bool          // 是否禁用长连接，默认否
+	DisablePreParseMultipartForm bool          // 是否不预先解析多部分表单，默认否
+	StreamRequestBody            bool          // 是否流式处理请求正文，默认否
+	NoDefaultServerHeader        bool          // 是否不要默认的服务器名称标头，默认否
+	DisablePrintRoute            bool          // 是否禁止打印路由，默认否
 	Network                      string        // "tcp", "udp", "unix"(unix domain socket)，默认 "tcp"
 	Addr                         string        // 监听地址，默认 ":8888"
 	BasePath                     string        // 基本路径，默认 "/"
-	ExitWaitTimeout              time.Duration // 优雅退出的等待时间，默认 5s。
+	ExitWaitTimeout              time.Duration // 优雅退出的等待时间，默认 5s
 	TLS                          *tls.Config
-	ALPN                         bool  // ALPN 应用层协议协商的开关
-	H2C                          bool  // H2C 即 HTTP/2 Cleartext 协议开关
+	ALPN                         bool  // 是否打开 ALPN 应用层协议协商的开关，默认否
+	H2C                          bool  // 是否打开 HTTP/2 Cleartext 协议开关，默认否
 	ReadBufferSize               int   // 初始的读缓冲大小，默认 4KB。通常无需设置。
-	Tracers                      []any // 一组链路跟踪器
+	Tracers                      []any // 链路跟踪控制器器，默认零长度切片
 	TraceLevel                   any   // 跟踪级别，默认 stats.LevelDetailed
 	ListenConfig                 *net.ListenConfig
 
@@ -113,7 +111,7 @@ func (o *Options) Apply(opts []Option) {
 	}
 }
 
-// NewOptions 创建配置项并应用指定的配置函数。
+// NewOptions 创建基于给定配置函数的配置项。
 func NewOptions(opts []Option) *Options {
 	options := &Options{
 		KeepAliveTimeout:      defaultKeepAliveTimeout,
@@ -130,6 +128,7 @@ func NewOptions(opts []Option) *Options {
 		ReadBufferSize:        defaultReadBufferSize,
 		Tracers:               []any{},
 		TraceLevel:            new(any),
+		Registry:              registry.NoopRegistry,
 	}
 	options.Apply(opts)
 	return options

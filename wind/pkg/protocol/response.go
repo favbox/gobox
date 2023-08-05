@@ -362,7 +362,7 @@ func (resp *Response) SetConnectionClose() {
 	resp.Header.SetConnectionClose(true)
 }
 
-// SetMaxKeepBodySize 设置响应的主体最大保留字节数。
+// SetMaxKeepBodySize 设置响应正文的最大保留字节数。
 func (resp *Response) SetMaxKeepBodySize(n int) {
 	resp.maxKeepBodySize = n
 }

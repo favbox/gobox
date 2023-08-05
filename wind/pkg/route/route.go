@@ -22,7 +22,7 @@ type Route struct {
 // Routes 定义了一组路由信息。
 type Routes []Route
 
-// Router 定义了所有路由处理器的接口。
+// Router 定义了所有路由器的接口。
 type Router interface {
 	Use(...app.HandlerFunc) Router
 	Handle(string, string, ...app.HandlerFunc) Router
@@ -96,38 +96,38 @@ func (group *RouterGroup) Any(relativePath string, handlers ...app.HandlerFunc) 
 	return group.returnObj()
 }
 
-// GET 是 Handle("GET", relativePath, handlers) 的快捷方式。
+// GET 注册路径及其经由的 GET 处理链，是 Handle("GET", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) GET(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodGet, relativePath, handlers)
 }
 
-// POST 是 Handle("POST", relativePath, handlers) 的快捷方式。
+// POST 注册路径及其经由的 POST 处理链， 是 Handle("POST", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) POST(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodPost, relativePath, handlers)
 }
 
-// DELETE 是 Handle("DELETE", relativePath, handlers) 的快捷方式。
+// DELETE 注册路径及其经由的 DELETE 处理链， 是 Handle("DELETE", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) DELETE(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodDelete, relativePath, handlers)
 
 }
 
-// PATCH 是 Handle("PATCH", relativePath, handlers) 的快捷方式。
+// PATCH 注册路径及其经由的 PATCH 处理链， 是 Handle("PATCH", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PATCH(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// PUT 是 Handle("PUT", relativePath, handlers) 的快捷方式。
+// PUT 注册路径及其经由的 PUT 处理链， 是 Handle("PUT", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) PUT(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// OPTIONS 是 Handle("OPTIONS", relativePath, handlers) 的快捷方式。
+// OPTIONS 注册路径及其 OPTIONS 处理链， 是 Handle("OPTIONS", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) OPTIONS(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }
 
-// HEAD 是 Handle("HEAD", relativePath, handlers) 的快捷方式。
+// HEAD 注册路径及其经由的 HEAD 处理链， 是 Handle("HEAD", relativePath, handlers) 的快捷方式。
 func (group *RouterGroup) HEAD(relativePath string, handlers ...app.HandlerFunc) Router {
 	return group.handle(consts.MethodHead, relativePath, handlers)
 }

@@ -683,7 +683,7 @@ func (req *Request) SetIsTLS(isTLS bool) {
 	req.isTLS = isTLS
 }
 
-// SetMaxKeepBodySize 设置请求的正文最大保留字节数。
+// SetMaxKeepBodySize 设置请求正文的最大保留字节数。
 func (req *Request) SetMaxKeepBodySize(n int) {
 	req.maxKeepBodySize = n
 }

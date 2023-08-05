@@ -35,7 +35,7 @@ func (r HTML) WriteContentType(resp *protocol.Response) {
 	writeContentType(resp, htmlContentType)
 }
 
-// HTMLRender 超文本渲染器会被 HTMLProduction 和 HTMLDebug 实现。
+// HTMLRender 超文本渲染器，会被 HTMLProduction 和 HTMLDebug 实现。
 type HTMLRender interface {
 	// Instance 返回一个 HTML 实例。
 	Instance(string, any) Render

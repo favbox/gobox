@@ -8,7 +8,7 @@ import (
 
 var _ suite.ServerFactory = (*serverFactory)(nil)
 
-// 实现了创建普通服务器的工厂方法
+// 实现了创建普通服务器的工厂方法。
 type serverFactory struct {
 	option *http1.Option
 }
@@ -21,7 +21,7 @@ func (s *serverFactory) New(core suite.Core) (server protocol.Server, err error)
 	return srv, nil
 }
 
-// NewServerFactory 返回基于给定 HTTP/1.1 选项实现服务器创建的工厂方法。
+// NewServerFactory 返回基于 HTTP/1.1 选项的服务器工厂。
 func NewServerFactory(option *http1.Option) suite.ServerFactory {
 	return &serverFactory{
 		option: option,

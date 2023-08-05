@@ -1,7 +1,7 @@
 package hlog
 
 const (
-	systemLogPrefix = "wind: "
+	systemLogPrefix = "WIND: "
 
 	EngineErrorFormat = "Error=%s, remoteAddr=%s"
 )

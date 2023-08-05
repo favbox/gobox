@@ -24,7 +24,7 @@ const (
 
 // Core 是承诺为协议层提供扩展的核心接口。
 type Core interface {
-	// IsRunning 检查引擎是否在运行。
+	// IsRunning 报告检查引擎是否正在运行。
 	IsRunning() bool
 
 	// GetCtxPool 用于实现协议服务器的上下文池
@@ -67,58 +67,37 @@ func (w *coreWrapper) ServeHTTP(c context.Context, ctx *app.RequestContext) {
 	w.Core.ServeHTTP(c, ctx)
 }
 
-// Config 用来维护协议与对应服务器的映射。
+// Config 用于维护协议及其服务器工厂。
 type Config struct {
-	altServerConfig *altServerConfig               // 协议替补的服务器配置
+	altServerConfig *altServerConfig               // 替补服务器配置
 	configMap       map[string]ServerFactory       // 协议对应的普通服务器工厂
 	streamConfigMap map[string]StreamServerFactory // 协议对应的流式服务器工厂
 }
 
-// Add 添加给定协议的服务器工厂方法。
-func (c *Config) Add(protocol string, factory any) {
-	switch newFac := factory.(type) {
-	case ServerFactory:
-		if oldFac := c.configMap[protocol]; oldFac != nil {
-			hlog.SystemLogger().Warnf("协议 %s 的服务器工厂将被自定义函数覆盖")
-		}
-		c.configMap[protocol] = newFac
-	case StreamServerFactory:
-		if oldFac := c.streamConfigMap[protocol]; oldFac != nil {
-			hlog.SystemLogger().Warnf("协议 %s 的服务器工厂将被自定义函数覆盖")
-		}
-		c.streamConfigMap[protocol] = newFac
-	default:
-		hlog.SystemLogger().Fatalf("不支持的服务器工厂类型：%T", newFac)
-	}
-}
-
-// Get 返回指定协议名称的普通服务器工厂。
+// Get 获取给定协议的服务器工厂。
 func (c *Config) Get(protocol string) ServerFactory {
 	return c.configMap[protocol]
 }
 
-// Delete 删除给定协议名称的普通服务器工厂。
-func (c *Config) Delete(protocol string) {
-	delete(c.configMap, protocol)
+// Add 添加给定协议的服务器工厂。
+func (c *Config) Add(protocol string, factory any) {
+	switch factory := factory.(type) {
+	case ServerFactory:
+		if fac := c.configMap[protocol]; fac != nil {
+			hlog.SystemLogger().Warnf("协议 %s 的服务器工厂将被新工厂覆盖", protocol)
+		}
+		c.configMap[protocol] = factory
+	case StreamServerFactory:
+		if oldFac := c.streamConfigMap[protocol]; oldFac != nil {
+			hlog.SystemLogger().Warnf("协议 %s 的服务器工厂将被新工厂覆盖", protocol)
+		}
+		c.streamConfigMap[protocol] = factory
+	default:
+		hlog.SystemLogger().Fatalf("不支持的服务器工厂类型：%T", factory)
+	}
 }
 
-// Load 加载给定协议对应的普通服务器。
-func (c *Config) Load(core Core, protocol string) (server protocol.Server, err error) {
-	if c.configMap[protocol] == nil {
-		return nil, errors.NewPrivate("WIND: 加载服务器出错，不支持的协议：" + protocol)
-	}
-	// 未指定替代协议的服务器，或给定的协议正好替代协议一致，则返回基于给定内核 core 创建的服务器。
-	if c.altServerConfig == nil || c.altServerConfig.targetProtocol == protocol {
-		return c.configMap[protocol].New(core)
-	}
-	// 否则，返回基于给定内核 core 包装后创建的服务器。
-	return c.configMap[protocol].New(&coreWrapper{
-		Core:          core,
-		beforeHandler: c.altServerConfig.setAltHeaderFunc,
-	})
-}
-
-// LoadAll 创建所有协议的服务器并返回映射。
+// LoadAll 加载所有可用的服务器协议及其实现。
 func (c *Config) LoadAll(core Core) (serverMap ServerMap, streamServerMap StreamServerMap, err error) {
 	// 预备一个包装后的内核
 	var wrappedCore *coreWrapper
@@ -159,6 +138,29 @@ func (c *Config) LoadAll(core Core) (serverMap ServerMap, streamServerMap Stream
 
 	// 返回创建的协议与服务器映射
 	return serverMap, streamServerMap, nil
+}
+
+// Load 加载给定协议对应的普通服务器。
+func (c *Config) Load(core Core, protocol string) (server protocol.Server, err error) {
+	if c.configMap[protocol] == nil {
+		return nil, errors.NewPrivate("WIND: 加载服务器出错，不支持的协议：" + protocol)
+	}
+
+	// 若未配置替补服务器，或给定协议与替补协议一致，则返回该协议的服务器。
+	if c.altServerConfig == nil || c.altServerConfig.targetProtocol == protocol {
+		return c.configMap[protocol].New(core)
+	}
+
+	// 否则，返回给定协议经过包装后的服务器。
+	return c.configMap[protocol].New(&coreWrapper{
+		Core:          core,
+		beforeHandler: c.altServerConfig.setAltHeaderFunc,
+	})
+}
+
+// Delete 删除给定协议的普通服务器工厂。
+func (c *Config) Delete(protocol string) {
+	delete(c.configMap, protocol)
 }
 
 func (c *Config) SetAltHeader(targetProtocol string, altHeader string) {

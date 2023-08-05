@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"github.com/favbox/gosky/wind/internal/bytesconv"
 	"github.com/favbox/gosky/wind/internal/bytestr"
 	"github.com/favbox/gosky/wind/internal/nocopy"
+	internalStats "github.com/favbox/gosky/wind/internal/stats"
 	"github.com/favbox/gosky/wind/pkg/app"
 	"github.com/favbox/gosky/wind/pkg/app/server/render"
 	"github.com/favbox/gosky/wind/pkg/common/config"
@@ -69,6 +71,68 @@ type hijackConn struct {
 	e *Engine
 }
 
+// Deprecated: 仅用于获取全局默认传输器 - 可能并非引擎真正使用的。
+// 使用 *Engine.GetTransporterName 获取真实使用的传输器。
+func GetTransporterName() (tName string) {
+	defer func() {
+		err := recover()
+		if err != nil || tName == "" {
+			tName = unknownTransporterName
+		}
+	}()
+	fName := runtime.FuncForPC(reflect.ValueOf(defaultTransporter).Pointer()).Name()
+	fSlice := strings.Split(fName, "/")
+	name := fSlice[len(fSlice)-1]
+	fSlice = strings.Split(name, ".")
+	tName = fSlice[0]
+	return
+}
+
+// SetTransporter 设置全局默认的网络传输器。
+func SetTransporter(transporter func(options *config.Options) network.Transporter) {
+	defaultTransporter = transporter
+}
+
+// NewEngine 创建给定选项的路由引擎。
+func NewEngine(opt *config.Options) *Engine {
+	engine := &Engine{
+		trees: make(MethodTrees, 0, 9),
+		RouterGroup: RouterGroup{
+			Handlers: nil,
+			basePath: opt.BasePath,
+			root:     true,
+		},
+		transport:             defaultTransporter(opt),
+		tracerCtl:             &internalStats.Controller{},
+		protocolServers:       make(map[string]protocol.Server),
+		protocolStreamServers: make(map[string]protocol.StreamServer),
+		enableTrace:           true,
+		options:               opt,
+	}
+	if opt.TransporterNewer != nil {
+		engine.transport = opt.TransporterNewer(opt)
+	}
+	engine.RouterGroup.engine = engine
+
+	traceLevel := initTrace(engine)
+
+	// 定义 RequestContext 上下文池的新建函数
+	engine.ctxPool.New = func() any {
+		ctx := engine.allocateContext()
+		if engine.enableTrace {
+			ti := traceinfo.NewTraceInfo()
+			ti.Stats().SetLevel(traceLevel)
+			ctx.SetTraceInfo(ti)
+		}
+		return ctx
+	}
+
+	// 初始化协议组
+	engine.protocolSuite = suite.New()
+
+	return engine
+}
+
 // Engine 路由引擎，实现路由及协议服务器。
 type Engine struct {
 	noCopy nocopy.NoCopy
@@ -77,20 +141,20 @@ type Engine struct {
 	Name       string
 	serverName atomic.Value
 
-	// 路由器和协议服务器的配置项
+	// 路由器和服务器的选项
 	options *config.Options
 
 	// 路由
 	RouterGroup
 	trees MethodTrees
 
-	// 最大路由参数个数
+	// 路由当前最大参数个数
 	maxParams uint16
 
-	allNoMethod app.HandlersChain
-	allNoRoute  app.HandlersChain
-	noRoute     app.HandlersChain
-	noMethod    app.HandlersChain
+	allNoMethod app.HandlersChain // 内置的方法不允许处理器
+	allNoRoute  app.HandlersChain // 内置的路由找不到处理器
+	noRoute     app.HandlersChain // 用户的路由找不到处理器
+	noMethod    app.HandlersChain // 用户的方法不允许处理器
 
 	delims     render.Delims     // HTML 模板的分隔符
 	funcMap    template.FuncMap  // HTML 模板的函数映射
@@ -115,8 +179,8 @@ type Engine struct {
 
 	// 管理协议层不同协议对应的服务器的创建
 	protocolSuite         *suite.Config
-	protocolServers       map[string]protocol.Server       // 协议与普通服务器的映射
-	protocolStreamServers map[string]protocol.StreamServer // 协议与流式服务器的映射
+	protocolServers       map[string]protocol.Server       // 协议与可用的普通服务器实现
+	protocolStreamServers map[string]protocol.StreamServer // 协议与可用的流式服务器实现
 
 	// RequestContext 连接池
 	ctxPool sync.Pool
@@ -147,169 +211,29 @@ type Engine struct {
 	formValueFunc app.FormValueFunc
 }
 
-func NewEngine(opt *config.Options) *Engine {
-	engine := &Engine{
-		trees: make(MethodTrees, 0, 9),
-		RouterGroup: RouterGroup{
-			Handlers: nil,
-			basePath: opt.BasePath,
-			root:     true,
-		},
-		transport: defaultTransporter(opt),
-	}
-	if opt.TransporterNewer != nil {
-		engine.transport = opt.TransporterNewer(opt)
-	}
-	engine.RouterGroup.engine = engine
-
-	traceLevel := initTrace(engine)
-
-	// 定义 RequestContext 上下文池的新建函数
-	engine.ctxPool.New = func() any {
-		ctx := engine.allocateContext()
-		if engine.enableTrace {
-			ti := traceinfo.NewTraceInfo()
-			ti.Stats().SetLevel(traceLevel)
-			ctx.SetTraceInfo(ti)
-		}
-		return ctx
-	}
-
-	// 初始化协议组
-	engine.protocolSuite = suite.New()
-
-	return engine
-}
-
-// Init 初始化路由引擎。
+// NewContext 创建一个无请求/无响应信息的纯粹上下文。
 //
-// 如添加默认的 http1 协议服务器。
-func (engine *Engine) Init() error {
-	// 默认添加内置的 http1 服务器
-	if !engine.HasServer(suite.HTTP1) {
-		engine.AddProtocol(suite.HTTP1, factory.NewServerFactory(newHttp1OptionFromEngine(engine)))
-	}
-
-	serverMap, streamServerMap, err := engine.protocolSuite.LoadAll(engine)
-	if err != nil {
-		return errs.New(err, errs.ErrorTypePrivate, "加载所有协议组错误")
-	}
-
-	engine.protocolServers = serverMap
-	engine.protocolStreamServers = streamServerMap
-
-	// 若启用 ALPN 协议自动切换，则将 suite.HTTP1 作为写一个备用协议。
-	if engine.alpnEnable() {
-		engine.options.TLS.NextProtos = append(engine.options.TLS.NextProtos, suite.HTTP1)
-	}
-
-	if !atomic.CompareAndSwapUint32(&engine.status, 0, statusInitialized) {
-		return errInitFailed
-	}
-	return nil
-}
-
-// NewContext 创建一个无请求/响应的纯粹请求上下文。
+// 注意，在用于处理器之前设置 Request 请求字段。
 func (engine *Engine) NewContext() *app.RequestContext {
 	return app.NewContext(engine.maxParams)
 }
 
-func (engine *Engine) IsRunning() bool {
-	return atomic.LoadUint32(&engine.status) == statusRunning
-}
-
-// IsStreamRequestBody 是否流式处理请求正文？
-func (engine *Engine) IsStreamRequestBody() bool {
-	return engine.options.StreamRequestBody
-}
-
-// IsTraceEnable 是否启用链路跟踪？
-func (engine *Engine) IsTraceEnable() bool {
-	return engine.enableTrace
-}
-
-// NoRoute 设置 404 请求方法未找到时对应的处理链，默认返回 404 状态码。
-func (engine *Engine) NoRoute(handlers ...app.HandlerFunc) {
-	engine.noRoute = handlers
-	engine.rebuild404Handlers()
-}
-
-func (engine *Engine) rebuild404Handlers() {
-	engine.allNoRoute = engine.combineHandlers(engine.noRoute)
-}
-
-// NoMethod 设置405请求方法不允许时对应的处理链。
-func (engine *Engine) NoMethod(handlers ...app.HandlerFunc) {
-	engine.noMethod = handlers
-	engine.rebuild405Handlers()
-}
-
-func (engine *Engine) rebuild405Handlers() {
-	engine.allNoMethod = engine.combineHandlers(engine.noMethod)
-}
-
-// PrintRoute 递归打印给定方法的路由节点信息。
-func (engine *Engine) PrintRoute(method string) {
-	root := engine.trees.get(method)
-	printNode(root.root, 0)
-}
-
-// 递归打印路由节点信息
-func printNode(node *node, level int) {
-	fmt.Println("node.prefix: " + node.prefix)
-	fmt.Println("node.ppath: " + node.ppath)
-	fmt.Printf("level: %#v\n\n", level)
-	for i := 0; i < len(node.children); i++ {
-		printNode(node.children[i], level+1)
-	}
-}
-
-// Routes 返回已注册的路由切片，及关键信息，如： HTTP 方法、路径和处理器名称。
-func (engine *Engine) Routes() (routes Routes) {
-	for _, tree := range engine.trees {
-		routes = iterate(tree.method, routes, tree.root)
-	}
-	return routes
-}
-
-// 递归路由并返回。
-func iterate(method string, routes Routes, root *node) Routes {
-	if len(root.handlers) > 0 {
-		handlerFunc := root.handlers.Last()
-		routes = append(routes, Route{
-			Method:      method,
-			Path:        root.ppath,
-			Handler:     utils.NameOfFunction(handlerFunc),
-			HandlerFunc: handlerFunc,
-		})
-	}
-
-	for _, child := range root.children {
-		routes = iterate(method, routes, child)
-	}
-
-	if root.paramChild != nil {
-		routes = iterate(method, routes, root.paramChild)
-	}
-
-	if root.anyChild != nil {
-		routes = iterate(method, routes, root.anyChild)
-	}
-
-	return routes
-}
-
+// Run 初始化并由传输器监听连接并提供 Serve 服务。
 func (engine *Engine) Run() (err error) {
+	// 初始化引擎：加载协议及其服务器实现
 	if err = engine.Init(); err != nil {
 		return err
 	}
 
+	// 切换引擎状态至运行中
 	if !atomic.CompareAndSwapUint32(&engine.status, statusInitialized, statusRunning) {
 		return errAlreadyRunning
 	}
+
+	// 返回监听服务出错后，切换引擎转改至已关闭
 	defer atomic.SwapUint32(&engine.status, statusClosed)
 
-	// 触发可能存在的回调钩子
+	// 依次触发可能存在的启动钩子
 	ctx := context.Background()
 	for i := range engine.OnRun {
 		if err = engine.OnRun[i](ctx); err != nil {
@@ -317,24 +241,121 @@ func (engine *Engine) Run() (err error) {
 		}
 	}
 
-	return engine.listenAndServe()
-}
-
-func (engine *Engine) listenAndServe() error {
 	hlog.SystemLogger().Infof("使用网络库=%s", engine.GetTransporterName())
-	return engine.transport.ListenAndServe(engine.onData)
-}
+	err = engine.transport.ListenAndServe(func(ctx context.Context, conn any) error {
+		switch conn := conn.(type) {
+		case network.Conn:
+			err = engine.Serve(ctx, conn)
+		case network.StreamConn:
+			err = engine.ServeStream(ctx, conn)
+		}
+		return err
+	})
 
-func (engine *Engine) onData(ctx context.Context, conn any) (err error) {
-	switch conn := conn.(type) {
-	case network.Conn:
-		err = engine.Serve(ctx, conn)
-	case network.StreamConn:
-		err = engine.ServeStream(ctx, conn)
-	}
 	return
 }
 
+// Init 初始化可用协议。 默认内置 HTTP1 协议服务器。
+func (engine *Engine) Init() error {
+	// 默认内置 HTTP1 协议的服务器实现
+	if !engine.HasServer(suite.HTTP1) {
+		engine.AddProtocol(suite.HTTP1, factory.NewServerFactory(newHttp1OptionFromEngine(engine)))
+	}
+
+	// 加载所有可用的服务器协议及其实现
+	serverMap, streamServerMap, err := engine.protocolSuite.LoadAll(engine)
+	if err != nil {
+		return errs.New(err, errs.ErrorTypePrivate, "加载所有协议组错误")
+	}
+	engine.protocolServers = serverMap
+	engine.protocolStreamServers = streamServerMap
+
+	// 若启用 ALPN，则将 HTTP1 作为 TLS 的备用回退协议。
+	if engine.alpnEnable() {
+		engine.options.TLS.NextProtos = append(engine.options.TLS.NextProtos, suite.HTTP1)
+	}
+
+	// 尝试将引擎状态切至已初始化
+	if !atomic.CompareAndSwapUint32(&engine.status, 0, statusInitialized) {
+		return errInitFailed
+	}
+
+	return nil
+}
+
+// HasServer 报告是否有给定协议的服务器实现。
+func (engine *Engine) HasServer(protocol string) bool {
+	return engine.protocolSuite.Get(protocol) != nil
+}
+
+// AddProtocol 添加给定协议的服务器工厂。
+func (engine *Engine) AddProtocol(protocol string, factory any) {
+	engine.protocolSuite.Add(protocol, factory)
+}
+
+// SetAltHeader 设置目标协议 targetProtocol 以外协议的 "Alt-Svc" 标头值。
+func (engine *Engine) SetAltHeader(targetProtocol, altHeaderValue string) {
+	engine.protocolSuite.SetAltHeader(targetProtocol, altHeaderValue)
+}
+
+// Shutdown 优雅退出服务器，步骤如下：
+//
+//  1. 依次触发 Engine.OnShutdown 钩子函数，直至完成或超时；
+//  2. 关闭网络监听器，不再接受新连接；
+//  3. 等待所有连接关闭：
+//     短时可处理的连接处理完就关闭
+//     手中请求或下个请求，则等待触达空闲超时(IdleTimeout)或优雅退出超时(ExitWaitTime)。
+//  4. 退出
+func (engine *Engine) Shutdown(ctx context.Context) (err error) {
+	if atomic.LoadUint32(&engine.status) != statusRunning {
+		return errStatusNotRunning
+	}
+	if !atomic.CompareAndSwapUint32(&engine.status, statusRunning, statusShutdown) {
+		return
+	}
+
+	ch := make(chan struct{})
+	// 触发可能的钩子
+	go engine.executeOnShutdownHooks(ctx, ch)
+	defer func() {
+		// 确保钩子执行完成或超时
+		select {
+		case <-ctx.Done():
+			hlog.SystemLogger().Infof("执行 OnShutdownHooks 超时：错误=%v", ctx.Err())
+			return
+		case <-ch:
+			hlog.SystemLogger().Info("执行 OnShutdownHooks 完成")
+			return
+		}
+	}()
+
+	// 注销服务
+	if opt := engine.options; opt != nil && opt.Registry != nil {
+		if err = opt.Registry.Deregister(opt.RegistryInfo); err != nil {
+			hlog.SystemLogger().Errorf("服务注销出错 error=%v", err)
+			return err
+		}
+	}
+
+	// 关闭传输器
+	if err := engine.transport.Shutdown(ctx); err != ctx.Err() {
+		return err
+	}
+
+	return
+}
+
+// Close 关闭路由引擎。
+//
+// 包括底层传输器、HTML 渲染器可能用到的文件监视器。
+func (engine *Engine) Close() error {
+	if engine.htmlRender != nil {
+		engine.htmlRender.Close()
+	}
+	return engine.transport.Close()
+}
+
+// Serve 提供普通连接服务。通过协议可用的服务器，自动回调 ServeHTTP。
 func (engine *Engine) Serve(ctx context.Context, conn network.Conn) (err error) {
 	defer func() {
 		errProcess(conn, err)
@@ -377,6 +398,7 @@ func (engine *Engine) Serve(ctx context.Context, conn network.Conn) (err error) 
 	return
 }
 
+// ServeStream 提供流式连接服务。通过协议可用的服务器，自动回调 ServeHTTP。
 func (engine *Engine) ServeStream(ctx context.Context, conn network.StreamConn) (err error) {
 	// ALPN 协议
 	if engine.options.ALPN && engine.options.TLS != nil {
@@ -393,6 +415,186 @@ func (engine *Engine) ServeStream(ctx context.Context, conn network.StreamConn) 
 	}
 
 	return errs.ErrNotSupportProtocol
+}
+
+// ↓ ↓ ↓ ↓ ↓ suite.Core 接口的具体实现  ↓ ↓ ↓ ↓ ↓
+
+// IsRunning 报告引擎是否正在运行。
+func (engine *Engine) IsRunning() bool {
+	return atomic.LoadUint32(&engine.status) == statusRunning
+}
+
+// GetCtxPool 返回引擎的请求上下文池子。
+func (engine *Engine) GetCtxPool() *sync.Pool {
+	return &engine.ctxPool
+}
+
+// ServeHTTP 提供 HTTP 请求服务。
+//
+// 是路由层对协议层的 suite.Core 接口的具体实现：
+//
+//  1. 上游协议服务器如 http1.Server Serve 连接：处理请求 → 回调本函数 → 进行响应。
+//  2. 本函数处理路由：找路由的处理器 → 找到就 Next 业务端处理链 → 找不到就处理错误。
+func (engine *Engine) ServeHTTP(c context.Context, ctx *app.RequestContext) {
+	if engine.PanicHandler != nil {
+		defer engine.recover(ctx)
+	}
+
+	rPath := string(ctx.Request.URI().Path())
+	httpMethod := bytesconv.B2s(ctx.Request.Header.Method())
+	unescape := false
+	if engine.options.UseRawPath {
+		rPath = string(ctx.Request.URI().PathOriginal())
+		unescape = engine.options.UnescapePathValues
+	}
+
+	if engine.options.RemoveExtraSlash {
+		rPath = utils.CleanPath(rPath)
+	}
+
+	// 若路由路径为空或未以 '/' 开头，需遵循 RFC7230#section-5.3
+	if rPath == "" || rPath[0] != '/' {
+		serveError(c, ctx, consts.StatusBadRequest, default400Body)
+		return
+	}
+
+	// 若路由方法存在，则通过 Next 调用处理链
+	t := engine.trees
+	paramsPointer := &ctx.Params
+	for i, tl := 0, len(t); i < tl; i++ {
+		if t[i].method != httpMethod {
+			continue
+		}
+		// 在树中查找路由
+		value := t[i].find(rPath, paramsPointer, unescape)
+
+		if value.handlers != nil {
+			ctx.SetHandlers(value.handlers)
+			ctx.SetFullPath(value.fullPath)
+			ctx.Next(c)
+			return
+		}
+		if httpMethod != consts.MethodConnect && rPath != "/" {
+			if value.tsr && engine.options.RedirectTrailingSlash {
+				redirectTrailingSlash(ctx)
+				return
+			}
+			if engine.options.RedirectFixedPath && redirectFixedPath(ctx, t[i].root, engine.options.RedirectFixedPath) {
+				return
+			}
+		}
+		break
+	}
+
+	// 若方法不允许，则尝试替代方法的处理链
+	if engine.options.HandleMethodNotAllowed {
+		for _, tree := range engine.trees {
+			if tree.method == httpMethod {
+				continue
+			}
+			if value := tree.find(rPath, paramsPointer, unescape); value.handlers != nil {
+				ctx.SetHandlers(engine.allNoMethod)
+				serveError(c, ctx, consts.StatusMethodNotAllowed, default405Body)
+				return
+			}
+		}
+	}
+
+	// 请求至此，说明无用户处理器则用
+	ctx.SetHandlers(engine.allNoRoute)
+
+	// 然后处理 400 错误的路由
+	serveError(c, ctx, consts.StatusNotFound, default400Body)
+}
+
+// GetTracer 获取链路跟踪控制器。
+func (engine *Engine) GetTracer() tracer.Controller {
+	return engine.tracerCtl
+}
+
+// ↑ ↑ ↑ ↑ ↑ suite.Core 接口的具体实现  ↑ ↑ ↑ ↑ ↑
+
+// Use 附加路由组中间件？
+//
+// 将中间件包含在每个请求的处理链中，甚至 404, 405, 静态文件...
+//
+// 常用场景：日志记录、错误管理等。
+func (engine *Engine) Use(middleware ...app.HandlerFunc) Router {
+	engine.RouterGroup.Use(middleware...)
+	engine.rebuild404Handlers()
+	engine.rebuild405Handlers()
+	return engine
+}
+
+// GetOptions 返回路由器和协议服务器的配置项。
+func (engine *Engine) GetOptions() *config.Options {
+	return engine.options
+}
+
+// GetServerName 获取服务器名称。
+func (engine *Engine) GetServerName() []byte {
+	v := engine.serverName.Load()
+	var serverName []byte
+	if v == nil {
+		serverName = []byte(engine.Name)
+		if len(serverName) == 0 {
+			serverName = bytestr.DefaultServerName
+		}
+		engine.serverName.Store(serverName)
+	} else {
+		serverName = v.([]byte)
+	}
+	return serverName
+}
+
+// GetTransporterName 获取底层网络传输器的名称。
+func (engine *Engine) GetTransporterName() string {
+	return getTransporterName(engine.transport)
+}
+
+// IsStreamRequestBody 是否流式处理请求正文？
+func (engine *Engine) IsStreamRequestBody() bool {
+	return engine.options.StreamRequestBody
+}
+
+// IsTraceEnable 是否启用链路跟踪？
+func (engine *Engine) IsTraceEnable() bool {
+	return engine.enableTrace
+}
+
+// NoRoute 设置 404 请求方法未找到时对应的处理链，默认返回 404 状态码。
+func (engine *Engine) NoRoute(handlers ...app.HandlerFunc) {
+	engine.noRoute = handlers
+	engine.rebuild404Handlers()
+}
+
+// NoMethod 设置405请求方法不允许时对应的处理链。
+func (engine *Engine) NoMethod(handlers ...app.HandlerFunc) {
+	engine.noMethod = handlers
+	engine.rebuild405Handlers()
+}
+
+// PrintRoute 递归打印给定方法的路由节点信息。
+func (engine *Engine) PrintRoute(method string) {
+	root := engine.trees.get(method)
+	printNode(root.root, 0)
+}
+
+// Routes 返回已注册的路由切片，及关键信息，如： HTTP 方法、路径和处理器名称。
+func (engine *Engine) Routes() (routes Routes) {
+	for _, tree := range engine.trees {
+		routes = iterate(tree.method, routes, tree.root)
+	}
+	return routes
+}
+
+// Delims 设置 HTML 模板的左右分隔符并返回引擎。
+func (engine *Engine) Delims(left, right string) *Engine {
+	engine.delims = render.Delims{
+		Left:  left,
+		Right: right,
+	}
+	return engine
 }
 
 // LoadHTMLFiles 加载一组 HTML 文件，并关联到 HTML 渲染器。
@@ -430,11 +632,6 @@ func (engine *Engine) LoadHTMLGlob(pattern string) {
 	engine.SetHTMLTemplate(tmpl)
 }
 
-// SetAltHeader 为目标协议 targetProtocol 的可替换协议设置 "Alt-Svc" 标头的值。
-func (engine *Engine) SetAltHeader(targetProtocol, altHeaderValue string) {
-	engine.protocolSuite.SetAltHeader(targetProtocol, altHeaderValue)
-}
-
 // SetAutoReloadHTMLTemplate 关联模板与调试环境的 HTML 模板渲染器。
 func (engine *Engine) SetAutoReloadHTMLTemplate(tmpl *template.Template, files []string) {
 	engine.htmlRender = &render.HTMLDebug{
@@ -453,199 +650,9 @@ func (engine *Engine) SetHTMLTemplate(tmpl *template.Template) {
 	}
 }
 
-// Shutdown 优雅退出服务器，步骤如下：
-//
-//  1. 依次触发 Engine.OnShutdown 钩子函数，直至完成或超时
-//  2. 关闭网络监听器，这意味着不再接受新连接
-//  3. 等待所有连接关闭：
-//     短时可处理的连接处理完就关闭
-//     手里的或下一个请求，等到空闲超时 IdleTimeout 或 优雅退出超时 ExitWaitTime。
-//  4. 退出
-func (engine *Engine) Shutdown(ctx context.Context) (err error) {
-	if atomic.LoadUint32(&engine.status) != statusRunning {
-		return errStatusNotRunning
-	}
-	if !atomic.CompareAndSwapUint32(&engine.status, statusRunning, statusShutdown) {
-		return
-	}
-
-	ch := make(chan struct{})
-	// 触发可能的钩子
-	go engine.executeOnShutdownHooks(ctx, ch)
-
-	defer func() {
-		// 确保钩子执行完成或超时
-		select {
-		case <-ctx.Done():
-			hlog.SystemLogger().Infof("执行 OnShutdownHooks 超时：错误=%v", ctx.Err())
-			return
-		case <-ch:
-			hlog.SystemLogger().Info("执行 OnShutdownHooks 完成")
-			return
-		}
-	}()
-
-	// 注销服务
-	if opt := engine.options; opt != nil && opt.Registry != nil {
-		if err = opt.Registry.Deregister(opt.RegistryInfo); err != nil {
-			hlog.SystemLogger().Errorf("服务注销出错 error=%v", err)
-			return err
-		}
-	}
-
-	// 关闭网络传输器
-	if err := engine.transport.Shutdown(ctx); err != ctx.Err() {
-		return err
-	}
-
-	return
-}
-
-// 让路由引擎实现处理器接口。
-func (engine *Engine) ServeHTTP(c context.Context, ctx *app.RequestContext) {
-	if engine.PanicHandler != nil {
-		defer engine.recover(ctx)
-	}
-
-	rPath := string(ctx.Request.URI().Path())
-	httpMethod := bytesconv.B2s(ctx.Request.Header.Method())
-	unescape := false
-	if engine.options.UseRawPath {
-		rPath = string(ctx.Request.URI().PathOriginal())
-		unescape = engine.options.UnescapePathValues
-	}
-
-	if engine.options.RemoveExtraSlash {
-		rPath = utils.CleanPath(rPath)
-	}
-
-	// 遵循 RFC7230#section-5.3
-	if rPath == "" || rPath[0] != '/' {
-		serveError(c, ctx, consts.StatusBadRequest, default400Body)
-		return
-	}
-
-	// 查找给定 HTTP 方法树的根
-	t := engine.trees
-	paramsPointer := &ctx.Params
-	for i, tl := 0, len(t); i < tl; i++ {
-		if t[i].method != httpMethod {
-			continue
-		}
-		// 在树中查找路由
-		value := t[i].find(rPath, paramsPointer, unescape)
-
-		if value.handlers != nil {
-			ctx.SetHandlers(value.handlers)
-			ctx.SetFullPath(value.fullPath)
-			ctx.Next(c)
-			return
-		}
-		if httpMethod != consts.MethodConnect && rPath != "/" {
-			if value.tsr && engine.options.RedirectTrailingSlash {
-				redirectTrailingSlash(ctx)
-				return
-			}
-			if engine.options.RedirectFixedPath && redirectFixedPath(ctx, t[i].root, engine.options.RedirectFixedPath) {
-				return
-			}
-		}
-		break
-	}
-
-	if engine.options.HandleMethodNotAllowed {
-		for _, tree := range engine.trees {
-			if tree.method == httpMethod {
-				continue
-			}
-			if value := tree.find(rPath, paramsPointer, unescape); value.handlers != nil {
-				ctx.SetHandlers(engine.allNoMethod)
-				serveError(c, ctx, consts.StatusMethodNotAllowed, default405Body)
-				return
-			}
-		}
-	}
-	ctx.SetHandlers(engine.allNoRoute)
-	serveError(c, ctx, consts.StatusNotFound, default400Body)
-}
-
-// Use 附加中间件到服务器。即中间件将包含在每个请求的处理链中，甚至 404, 405, 静态文件...
-//
-// 例如，可通过中间件进行日志记录或错误管理。
-func (engine *Engine) Use(middleware ...app.HandlerFunc) Router {
-	engine.RouterGroup.Use(middleware...)
-	engine.rebuild404Handlers()
-	engine.rebuild405Handlers()
-	return engine
-}
-
-// AddProtocol 添加给定协议的服务器工厂方法。
-func (engine *Engine) AddProtocol(protocol string, factory any) {
-	engine.protocolSuite.Add(protocol, factory)
-}
-
-// Close 关闭路由引擎。
-//
-// 包括底层传输器、HTML 渲染器可能用到的文件监视器。
-func (engine *Engine) Close() error {
-	if engine.htmlRender != nil {
-		engine.htmlRender.Close()
-	}
-	return engine.transport.Close()
-}
-
-// Delims 设置 HTML 模板的左右分隔符并返回引擎。
-func (engine *Engine) Delims(left, right string) *Engine {
-	engine.delims = render.Delims{
-		Left:  left,
-		Right: right,
-	}
-	return engine
-}
-
-// GetCtxPool 返回引擎的上下文池子。
-func (engine *Engine) GetCtxPool() *sync.Pool {
-	return &engine.ctxPool
-}
-
-// GetOptions 返回路由器和协议服务器的配置项。
-func (engine *Engine) GetOptions() *config.Options {
-	return engine.options
-}
-
-func (engine *Engine) GetServerName() []byte {
-	v := engine.serverName.Load()
-	var serverName []byte
-	if v == nil {
-		serverName = []byte(engine.Name)
-		if len(serverName) == 0 {
-			serverName = bytestr.DefaultServerName
-		}
-		engine.serverName.Store(serverName)
-	} else {
-		serverName = v.([]byte)
-	}
-	return serverName
-}
-
-// GetTracer 获取链路跟踪控制器。
-func (engine *Engine) GetTracer() tracer.Controller {
-	return engine.tracerCtl
-}
-
-// GetTransporterName 获取底层网络传输器的名称。
-func (engine *Engine) GetTransporterName() string {
-	return getTransporterName(engine.transport)
-}
-
-// HasServer 判断给定协议的普通服务器工厂是否存在？
-func (engine *Engine) HasServer(name string) bool {
-	return engine.protocolSuite.Get(name) != nil
-}
-
-// HijackConnHandle 处理给定的劫持连接。
-func (engine *Engine) HijackConnHandle(c network.Conn, h app.HijackHandler) {
-	engine.hijackConnHandle(c, h)
+// SetFuncMap 设置用于 template.FuncMap 的模板函数映射。
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+	engine.funcMap = funcMap
 }
 
 // SetClientIPFunc 设置获取客户端 IP 的自定义函数。
@@ -658,9 +665,9 @@ func (engine *Engine) SetFormValueFunc(f app.FormValueFunc) {
 	engine.formValueFunc = f
 }
 
-// SetFuncMap 设置用于 template.FuncMap 的模板函数映射。
-func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
-	engine.funcMap = funcMap
+// HijackConnHandle 处理给定的劫持连接。
+func (engine *Engine) HijackConnHandle(c network.Conn, h app.HijackHandler) {
+	engine.hijackConnHandle(c, h)
 }
 
 func (engine *Engine) addRoute(method, path string, handlers app.HandlersChain) {
@@ -675,21 +682,31 @@ func (engine *Engine) addRoute(method, path string, handlers app.HandlersChain) 
 		debugPrintRoute(method, path, handlers)
 	}
 
-	//	TODO 待完善
+	methodRouter := engine.trees.get(method)
+	if methodRouter == nil {
+		methodRouter = &router{
+			method:        method,
+			root:          &node{},
+			hasTsrHandler: make(map[string]bool),
+		}
+		engine.trees = append(engine.trees, methodRouter)
+	}
+	methodRouter.addRoute(path, handlers)
+
+	// 更新 maxParams
+	if paramsCount := countParams(path); paramsCount > engine.maxParams {
+		engine.maxParams = paramsCount
+	}
 }
 
+// 汇报是否启用了 ALPN 以获取备用的回退协议。
 func (engine *Engine) alpnEnable() bool {
 	return engine.options.TLS != nil && engine.options.ALPN
 }
 
-// 处理恐慌。
-func (engine *Engine) recover(ctx *app.RequestContext) {
-	if r := recover(); r != nil {
-		engine.PanicHandler(context.Background(), ctx)
-	}
-}
-
-// 分配一个限定
+// 分配一个新的请求上下文。
+//
+// 设定了正文的最大保留字节数、获取客户端 IP 和表单值的自定义函数。
 func (engine *Engine) allocateContext() *app.RequestContext {
 	ctx := engine.NewContext()
 	ctx.Request.SetMaxKeepBodySize(engine.options.MaxKeepBodySize)
@@ -697,6 +714,29 @@ func (engine *Engine) allocateContext() *app.RequestContext {
 	ctx.SetClientIPFunc(engine.clientIPFunc)
 	ctx.SetFormValueFunc(engine.formValueFunc)
 	return ctx
+}
+
+// 获取 TLS 连接的下一个协商协议。
+func (engine *Engine) getNextProto(conn network.Conn) (proto string, err error) {
+	if tlsConn, ok := conn.(network.ConnTLSer); ok {
+		if engine.options.ReadTimeout > 0 {
+			if err := conn.SetReadTimeout(engine.options.ReadTimeout); err != nil {
+				hlog.SystemLogger().Errorf("BUG: 设置连接的读取超时时长=%s 错误=%s", engine.options.ReadTimeout, err)
+			}
+		}
+		err = tlsConn.Handshake()
+		if err == nil {
+			proto = tlsConn.ConnectionState().NegotiatedProtocol
+		}
+	}
+	return
+}
+
+// 处理恐慌。
+func (engine *Engine) recover(ctx *app.RequestContext) {
+	if r := recover(); r != nil {
+		engine.PanicHandler(context.Background(), ctx)
+	}
 }
 
 // 处理劫持连接。
@@ -746,22 +786,17 @@ func (engine *Engine) releaseHijackConn(hjc *hijackConn) {
 	engine.hijackConnPool.Put(hjc)
 }
 
-// 获取可能的安全连接的下一个协商协议。
-func (engine *Engine) getNextProto(conn network.Conn) (proto string, err error) {
-	if tlsConn, ok := conn.(network.ConnTLSer); ok {
-		if engine.options.ReadTimeout > 0 {
-			if err := conn.SetReadTimeout(engine.options.ReadTimeout); err != nil {
-				hlog.SystemLogger().Errorf("BUG: 设置连接的读取超时时长=%s 错误=%s", engine.options.ReadTimeout, err)
-			}
-		}
-		err = tlsConn.Handshake()
-		if err == nil {
-			proto = tlsConn.ConnectionState().NegotiatedProtocol
-		}
-	}
-	return
+// 重建 404 方法未找到处理器。
+func (engine *Engine) rebuild404Handlers() {
+	engine.allNoRoute = engine.combineHandlers(engine.noRoute)
 }
 
+// 重建 405 方法不允许处理器。
+func (engine *Engine) rebuild405Handlers() {
+	engine.allNoMethod = engine.combineHandlers(engine.noMethod)
+}
+
+// 执行引擎退出的回调钩子。
 func (engine *Engine) executeOnShutdownHooks(ctx context.Context, ch chan struct{}) {
 	wg := sync.WaitGroup{}
 	for i := range engine.OnShutdown {
@@ -775,22 +810,6 @@ func (engine *Engine) executeOnShutdownHooks(ctx context.Context, ch chan struct
 	ch <- struct{}{}
 }
 
-func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlersChain) {
-	nHandlers := len(handlers)
-	handlerName := app.GetHandlerName(handlers.Last())
-	if handlerName == "" {
-		handlerName = utils.NameOfFunction(handlers.Last())
-	}
-	hlog.SystemLogger().Debugf("Method=%-6s absolutePath=%-25s --> handlerName=%s (num=%d handlers)", httpMethod, absolutePath, handlerName, nHandlers)
-}
-
-func getTransporterName(transporter network.Transporter) string {
-	defer func() {}()
-	t := reflect.ValueOf(transporter).Type().String()
-	return strings.Split(strings.TrimPrefix(t, "*"), ".")[0]
-}
-
-// 仅用于内置的 http1 实现。
 func newHttp1OptionFromEngine(engine *Engine) *http1.Option {
 	opt := &http1.Option{
 		StreamRequestBody:            engine.options.StreamRequestBody,
@@ -832,6 +851,62 @@ func initTrace(engine *Engine) stats.Level {
 		traceLevel = tl
 	}
 	return traceLevel
+}
+
+func debugPrintRoute(httpMethod, absolutePath string, handlers app.HandlersChain) {
+	nHandlers := len(handlers)
+	handlerName := app.GetHandlerName(handlers.Last())
+	if handlerName == "" {
+		handlerName = utils.NameOfFunction(handlers.Last())
+	}
+	hlog.SystemLogger().Debugf("Method=%-6s absolutePath=%-25s --> handlerName=%s (num=%d handlers)", httpMethod, absolutePath, handlerName, nHandlers)
+}
+
+func getTransporterName(transporter network.Transporter) (tName string) {
+	defer func() {
+		err := recover()
+		if err != nil || tName == "" {
+			tName = unknownTransporterName
+		}
+	}()
+	t := reflect.ValueOf(transporter).Type().String()
+	tName = strings.Split(strings.TrimPrefix(t, "*"), ".")[0]
+	return tName
+}
+
+func iterate(method string, routes Routes, root *node) Routes {
+	if len(root.handlers) > 0 {
+		handlerFunc := root.handlers.Last()
+		routes = append(routes, Route{
+			Method:      method,
+			Path:        root.ppath,
+			Handler:     utils.NameOfFunction(handlerFunc),
+			HandlerFunc: handlerFunc,
+		})
+	}
+
+	for _, child := range root.children {
+		routes = iterate(method, routes, child)
+	}
+
+	if root.paramChild != nil {
+		routes = iterate(method, routes, root.paramChild)
+	}
+
+	if root.anyChild != nil {
+		routes = iterate(method, routes, root.anyChild)
+	}
+
+	return routes
+}
+
+func printNode(node *node, level int) {
+	fmt.Println("node.prefix: " + node.prefix)
+	fmt.Println("node.ppath: " + node.ppath)
+	fmt.Printf("level: %#v\n\n", level)
+	for i := 0; i < len(node.children); i++ {
+		printNode(node.children[i], level+1)
+	}
 }
 
 func redirectFixedPath(ctx *app.RequestContext, root *node, fixTrailingSlash bool) bool {
@@ -881,7 +956,7 @@ func trailingSlashURL(ts string) string {
 
 func serveError(c context.Context, ctx *app.RequestContext, code int, defaultMessage []byte) {
 	ctx.SetStatusCode(code)
-	ctx.Next(c)
+	ctx.Next(c) // TODO 无此路由为啥还继续 Next?
 	if ctx.Response.StatusCode() == code {
 		// 若正文存在（或由用户定制），别管他。
 		if ctx.Response.HasBodyBytes() || ctx.Response.IsBodyStream() {

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/favbox/gosky/wind/pkg/app/server/registry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,8 +36,7 @@ func TestDefaultOptions(t *testing.T) {
 	assert.False(t, options.H2C)
 	assert.Equal(t, []any{}, options.Tracers)
 	assert.Equal(t, new(any), options.TraceLevel)
-	// TODO 补全服务注册配置项的默认值测试
-	//assert.Equal(t, registry.NoopRegistry, options.Registry)
+	assert.Equal(t, registry.NoopRegistry, options.Registry)
 }
 
 // TestApplyCustomOptions 初始化后使用自定义值测试配置项应用函数
