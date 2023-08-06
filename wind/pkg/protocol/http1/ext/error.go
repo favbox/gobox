@@ -32,5 +32,5 @@ func HeaderError(typ string, err, errParse error, b []byte) error {
 }
 
 func headerErrorMsg(typ string, err error, b []byte) error {
-	return errs.NewPublic(fmt.Sprintf("读取 %s 标头出错: %s. 缓冲区大小=%d, 内容: %s", typ, err, len(b), BufferSnippet(b)))
+	return errs.NewPublic(fmt.Sprintf("读取 %s 标头出错: %s。缓冲区大小=%d, 内容: %s", typ, err, len(b), BufferSnippet(b)))
 }

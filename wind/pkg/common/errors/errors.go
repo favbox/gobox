@@ -14,7 +14,7 @@ var (
 	ErrNoMultipartForm    = errors.New("请求的内容类型没有多部分表单数据")
 	ErrNothingRead        = errors.New("未读取任何内容")
 	ErrNeedMore           = errors.New("需要更多数据")
-	ErrBodyTooLarge       = errors.New("正文大小超过限制")
+	ErrBodyTooLarge       = errors.New("正文大小超过给定限制")
 	ErrHijacked           = errors.New("连接已被劫持")
 	ErrChunkedStream      = errors.New("错误分块的正文流")
 	ErrNoFreeConns        = errors.New("没有可用的主机连接")

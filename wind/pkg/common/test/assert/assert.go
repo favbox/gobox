@@ -40,7 +40,7 @@ func Nil(t testing.TB, data any) {
 		return
 	}
 	if !reflect.ValueOf(data).IsNil() {
-		t.Fatalf("assertion failed, unexpected: %v, excepted: nil", data)
+		t.Fatalf("断言失败，, 不期望：%v，期望：nil", data)
 	}
 }
 

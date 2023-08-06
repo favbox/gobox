@@ -94,23 +94,23 @@ func SetTransporter(transporter func(options *config.Options) network.Transporte
 }
 
 // NewEngine 创建给定选项的路由引擎。
-func NewEngine(opt *config.Options) *Engine {
+func NewEngine(opts *config.Options) *Engine {
 	engine := &Engine{
 		trees: make(MethodTrees, 0, 9),
 		RouterGroup: RouterGroup{
 			Handlers: nil,
-			basePath: opt.BasePath,
+			basePath: opts.BasePath,
 			root:     true,
 		},
-		transport:             defaultTransporter(opt),
+		transport:             defaultTransporter(opts),
 		tracerCtl:             &internalStats.Controller{},
 		protocolServers:       make(map[string]protocol.Server),
 		protocolStreamServers: make(map[string]protocol.StreamServer),
 		enableTrace:           true,
-		options:               opt,
+		options:               opts,
 	}
-	if opt.TransporterNewer != nil {
-		engine.transport = opt.TransporterNewer(opt)
+	if opts.TransporterNewer != nil {
+		engine.transport = opts.TransporterNewer(opts)
 	}
 	engine.RouterGroup.engine = engine
 
@@ -202,7 +202,7 @@ type Engine struct {
 	// OnRun 是引擎启动时，依次触发的一组钩子函数。
 	OnRun []CtxErrCallback
 
-	// OnShutdown 是引擎关闭时，同时触发的一组钩子函数。
+	// OnShutdown 是引擎关闭时，并行触发的一组钩子函数。
 	OnShutdown []CtxCallback
 
 	// 自定义获取客户端 IP 的函数。
@@ -509,7 +509,7 @@ func (engine *Engine) GetTracer() tracer.Controller {
 
 // ↑ ↑ ↑ ↑ ↑ suite.Core 接口的具体实现  ↑ ↑ ↑ ↑ ↑
 
-// Use 附加路由组中间件？
+// Use 添加全局中间件。
 //
 // 将中间件包含在每个请求的处理链中，甚至 404, 405, 静态文件...
 //
@@ -957,7 +957,7 @@ func serveError(c context.Context, ctx *app.RequestContext, code int, defaultMes
 		if ctx.Response.HasBodyBytes() || ctx.Response.IsBodyStream() {
 			return
 		}
-		ctx.Response.Header.Set(consts.HeaderContentType, consts.MIMETextPlain)
+		ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
 		ctx.Response.SetBody(defaultMessage)
 	}
 }

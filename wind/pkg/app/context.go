@@ -141,6 +141,11 @@ func (ctx *RequestContext) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
 }
 
+// Hijacked 报告是否已调用 Hijack。
+func (ctx *RequestContext) Hijacked() bool {
+	return ctx.hijackHandler != nil
+}
+
 // IfModifiedSince 如果 lastModified 超过请求标头中的 'If-Modified-Since' 值，则返回真。
 //
 // 若无此标头或日期解析失败也返回真。
@@ -429,6 +434,14 @@ func (ctx *RequestContext) PureJSON(code int, obj any) {
 // 它也会自动将 Content-Type 设置为 "application/json"。
 func (ctx *RequestContext) IndentedJSON(code int, obj any) {
 	ctx.Render(code, render.IndentedJSON{Data: obj})
+}
+
+// Data 写入数据至正文字节缓冲区并更新响应状态码。
+func (ctx *RequestContext) Data(code int, contentType string, data []byte) {
+	ctx.Render(code, render.Data{
+		ContentType: contentType,
+		Data:        data,
+	})
 }
 
 // Query 返回给定 key 的查询值，否则返回空白字符串 `""`。

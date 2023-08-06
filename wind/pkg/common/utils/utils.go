@@ -11,6 +11,9 @@ import (
 
 var errNeedMore = errs.New(errs.ErrNeedMore, errs.ErrorTypePublic, "无法找到换行符")
 
+// H 是 map[string]any 的快捷方式。
+type H map[string]any
+
 // CaseInsensitiveCompare 不分大小写，比较两者是否相同。
 // 比直接转小写后相比更快。
 func CaseInsensitiveCompare(a, b []byte) bool {

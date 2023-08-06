@@ -389,7 +389,7 @@ func defaultErrorHandler(ctx *app.RequestContext, err error) {
 	if netErr, ok := err.(*net.OpError); ok && netErr.Timeout() {
 		ctx.AbortWithMsg("请求超时", consts.StatusRequestTimeout)
 	} else if errors.Is(err, errs.ErrBodyTooLarge) {
-		ctx.AbortWithMsg("请求实体太大", consts.StatusRequestEntityTooLarge)
+		ctx.AbortWithMsg("请求实体过大", consts.StatusRequestEntityTooLarge)
 	} else {
 		ctx.AbortWithMsg("解析请求时出错", consts.StatusBadRequest)
 	}
