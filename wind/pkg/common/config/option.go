@@ -37,25 +37,29 @@ type Options struct {
 	// WriteTimeout 是网络库写入的超时时间，默认为 0，即永不超时。
 	WriteTimeout time.Duration
 
-	// IdleTime 是连接的闲置超时，超时则关闭。 默认为 ReadTimeout 即 3 分钟，0 代表永不超时。
+	// IdleTime 是长连接的闲置超时，超时则关闭。 默认为 ReadTimeout 即 3 分钟，0 代表永不超时。
 	IdleTimeout time.Duration
 
-	// 是否将 /foo/ 重定向到 /foo，默认重定向。
+	// 是否将 /foo/ 重定向到 /foo，或者反过来。默认重定向。
 	RedirectTrailingSlash bool
 
 	// 将 /FOO 和 /..//FOO 重定向到 /foo，默认不重定向。
 	RedirectFixedPath bool
 
-	// 请求方法不允许时，使用替代方法的处理器。
+	// 请求方法不匹配但有同路径其他方法，返回 405 方法不允许而非 404 找不到。
 	HandleMethodNotAllowed bool
-
-	// 使用原始未转义的路径。
-	UseRawPath bool
 
 	// 移除额外的斜杠。
 	RemoveExtraSlash bool
 
-	// 不转义路径值，默认不转义。
+	// 使用原始未转义的路径进行路由匹配，默认不使用。
+	UseRawPath bool
+
+	// 转义路径值，如 `%2F` -> `/`。
+	// 若 UseRawPath 为 false（默认情况），
+	// 则 UnescapePathValues 实为 true，因为 URI.Path() 会被使用，它已转义。
+	// 若此值为 false，需配合 WithUseRawPath(true) 使用。
+	// 默认开启转义(true)。
 	UnescapePathValues bool
 
 	MaxRequestBodySize           int           // 正文的最大请求字节数，默认 4MB
@@ -66,7 +70,7 @@ type Options struct {
 	StreamRequestBody            bool          // 是否流式处理请求正文，默认否
 	NoDefaultServerHeader        bool          // 是否不要默认的服务器名称标头，默认否
 	DisablePrintRoute            bool          // 是否禁止打印路由，默认否
-	Network                      string        // "tcp", "udp", "unix"(unix domain socket)，默认 "tcp"
+	Network                      string        // 网络协议，可选 "tcp", "udp", "unix"(unix domain socket)，默认 "tcp"
 	Addr                         string        // 监听地址，默认 ":8888"
 	BasePath                     string        // 基本路径，默认 "/"
 	ExitWaitTimeout              time.Duration // 优雅退出的等待时间，默认 5s

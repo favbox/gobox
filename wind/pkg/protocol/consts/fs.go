@@ -10,7 +10,7 @@ const (
 	// 详见 app.FS。
 	FSCompressedFileSuffix    = ".wind.gz"
 	FSMinCompressRatio        = 0.8
-	FsMaxCompressibleFileSize = 8 * 1024 * 1024
+	FsMaxCompressibleFileSize = 8 * 1024 * 1024 // 最大可压缩文件字节数
 
 	// FSHandlerCacheDuration FS 打开的不活跃文件处理器的默认缓存时长。
 	FSHandlerCacheDuration = 10 * time.Second

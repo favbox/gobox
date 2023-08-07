@@ -404,9 +404,10 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 		return nil, errDirIndexRequired
 	}
 
-	if strings.HasSuffix(filePath, h.compressedFileSuffix) ||
-		fileInfo.Size() > consts.FsMaxCompressibleFileSize ||
-		!isFileCompressible(f, consts.FSMinCompressRatio) {
+	// 无需压缩的文件，直接返回
+	if strings.HasSuffix(filePath, h.compressedFileSuffix) || // 已经压缩了
+		fileInfo.Size() > consts.FsMaxCompressibleFileSize || // 大于 8MB
+		!isFileCompressible(f, consts.FSMinCompressRatio) { // 压缩率不高
 		return h.newFSFile(f, fileInfo, false)
 	}
 
@@ -790,7 +791,8 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 	n := 4096 - lr.N
 	zn := len(b.B)
 	bytebufferpool.Put(b)
-	return float64(zn) < float64(n)*minCompressRatio
+	compressible := float64(zn) < float64(n)*minCompressRatio
+	return compressible
 }
 
 type fsFile struct {

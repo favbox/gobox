@@ -506,3 +506,28 @@ func verifyResponseHeader(t *testing.T, h *protocol.ResponseHeader, expectedStat
 //	}
 //	wg.Wait()
 //}
+
+func TestSrv(t *testing.T) {
+	wind := New()
+	wind.Any("/", func(c context.Context, ctx *app.RequestContext) {
+		ctx.String(consts.StatusOK, "hello %s!", ctx.DefaultQuery("name", "world"))
+	})
+	wind.StaticFS("/static", &app.FS{
+		Root:                 "/Users/zs/Downloads",
+		IndexNames:           nil,
+		GenerateIndexPages:   true,
+		Compress:             true,
+		CompressedFileSuffix: "",
+		CacheDuration:        0,
+		AcceptByteRange:      false,
+		PathRewrite:          nil,
+		PathNotFound:         nil,
+	})
+
+	//err := wind.Run()
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	go wind.Spin()
+	select {}
+}

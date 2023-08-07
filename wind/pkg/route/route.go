@@ -62,7 +62,7 @@ func init() {
 
 var _ Routers = (*RouterGroup)(nil)
 
-// BasePath 获取路由组的基础路径，即这组路由的共同前缀。
+// BasePath 获取路由组的基本路径，即这组路由的共同前缀。
 func (group *RouterGroup) BasePath() string {
 	return group.basePath
 }
