@@ -1016,7 +1016,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	return append(dst, bytestr.StrCRLF...)
 }
 
-// ConnectionClose 汇报响应标头是否设置了 'Connection: close'。
+// ConnectionClose 汇报响应头是否设置了 'Connection: close'。
 func (h *ResponseHeader) ConnectionClose() bool {
 	return h.connectionClose
 }

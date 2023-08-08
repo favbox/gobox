@@ -14,6 +14,7 @@ type Render interface {
 var (
 	_ Render = Data{}
 	_ Render = String{}
+	_ Render = JSONRender{}
 )
 
 // 设置响应的内容类型。

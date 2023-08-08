@@ -63,6 +63,16 @@ func WithIdleTimeout(t time.Duration) config.Option {
 	}}
 }
 
+// WithKeepAliveTimeout 设置长连接超时时间。
+//
+// 在大多数情况下，无需关心该选项。
+// 默认值：1 分钟。
+func WithKeepAliveTimeout(t time.Duration) config.Option {
+	return config.Option{F: func(o *config.Options) {
+		o.KeepAliveTimeout = t
+	}}
+}
+
 // WithRedirectTrailingSlash 自动根据末尾的 /转发。
 //   - 路由器只有 /foo/ 则 /foo 重定向到 /foo；
 //   - 路由器只有 /foo 则 /foo/ 会重定向到 /foo/。
@@ -124,7 +134,7 @@ func WithUnescapePathValues(b bool) config.Option {
 }
 
 // WithDisablePreParseMultipartForm 不预先解析多部分表单，可以通过 ctx.Request.Body() 获取正文后由用户处理。
-// 默认值：false，预先解析。
+// 默认值：false，不禁用预先解析。
 func WithDisablePreParseMultipartForm(b bool) config.Option {
 	return config.Option{F: func(o *config.Options) {
 		o.DisablePreParseMultipartForm = b
@@ -164,21 +174,11 @@ func WithKeepAlive(b bool) config.Option {
 	}}
 }
 
-// WithKeepAliveTimeout 设置长连接超时时间。
-//
-// 在大多数情况下，无需关心该选项。
-// 默认值：1 分钟。
-func WithKeepAliveTimeout(t time.Duration) config.Option {
-	return config.Option{F: func(o *config.Options) {
-		o.KeepAliveTimeout = t
-	}}
-}
-
 // WithStreamBody 在流中读取正文。
 //
 // 启用流式处理，可在请求的正文超过当前字节数限制时，更快地调用处理器。
 //
-// 默认值：false，不启用。
+// 默认值：false，不启用流式正文。
 func WithStreamBody(b bool) config.Option {
 	return config.Option{F: func(o *config.Options) {
 		o.StreamRequestBody = b
@@ -193,7 +193,7 @@ func WithNetwork(nw string) config.Option {
 	}}
 }
 
-// WithExitWaitTime 优雅退出时间。
+// WithExitWaitTime 优雅退出的等待时间。
 //
 // 服务器会停止建立新连接，并对关闭后的每个请求设置 'Connection: close' 标头。
 // 当到达设定的时间关闭服务器。若所有连接均已关闭则可提前关闭。

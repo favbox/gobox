@@ -168,6 +168,13 @@ func (ctx *RequestContext) NotModified() {
 	ctx.SetStatusCode(consts.StatusNotModified)
 }
 
+// NotFound 重置响应并将响应的状态码设置为 '404 Not Found'。
+func (ctx *RequestContext) NotFound() {
+	ctx.Response.Reset()
+	ctx.SetStatusCode(consts.StatusNotFound)
+	ctx.SetBodyString(consts.StatusMessage(consts.StatusNotFound))
+}
+
 // IsHead 是否为 HEAD 请求？
 func (ctx *RequestContext) IsHead() bool {
 	return ctx.Request.Header.IsHead()
@@ -357,6 +364,16 @@ func (ctx *RequestContext) Body() ([]byte, error) {
 	return ctx.Request.BodyE()
 }
 
+// ClientIP 尝试解析标头中的 [X-Real-IP, X-Forwarded-For]，它在后台调用 RemoteAddr。
+//
+// 若不能满足要求，可使用 route.engine.SetClientIPFunc 注入个性化实现。
+func (ctx *RequestContext) ClientIP() string {
+	if ctx.clientIPFunc != nil {
+		return ctx.clientIPFunc(ctx)
+	}
+	return defaultClientIP(ctx)
+}
+
 // Next 仅限中间件内部使用。
 // 它将执行当前处理链内部所有挂起的处理器。
 func (ctx *RequestContext) Next(c context.Context) {
@@ -400,6 +417,11 @@ func (ctx *RequestContext) Render(code int, r render.Render) {
 	if err := r.Render(&ctx.Response); err != nil {
 		panic(err)
 	}
+}
+
+// ProtoBuf 将给定的结构作为 protobuf 序列化到响应体中。
+func (ctx *RequestContext) ProtoBuf(code int, obj any) {
+	ctx.Render(code, render.ProtoBuf{Data: obj})
 }
 
 // String 以字符串形式渲染给定格式的字符串，并写入状态码。
@@ -498,7 +520,7 @@ func (ctx *RequestContext) RemoteAddr() net.Addr {
 		return zeroTCPAddr
 	}
 	addr := ctx.conn.RemoteAddr()
-	if addr != nil {
+	if addr == nil {
 		return zeroTCPAddr
 	}
 	return addr
@@ -507,6 +529,189 @@ func (ctx *RequestContext) RemoteAddr() net.Addr {
 // GetHeader 获取请求标头中给定键的值。
 func (ctx *RequestContext) GetHeader(key string) []byte {
 	return ctx.Request.Header.Peek(key)
+}
+
+// Set 存储给定的键值到当前上下文。
+func (ctx *RequestContext) Set(key string, value any) {
+	ctx.mu.Lock()
+	if ctx.Keys == nil {
+		ctx.Keys = make(map[string]any)
+	}
+
+	ctx.Keys[key] = value
+	ctx.mu.Unlock()
+}
+
+// Value 返回给定键的值。若不存在返回 nil。
+func (ctx *RequestContext) Value(key any) any {
+	if ctx.Keys == nil {
+		return nil
+	}
+	if keyString, ok := key.(string); ok {
+		val, _ := ctx.Get(keyString)
+		return val
+	}
+	return nil
+}
+
+// Get 返回给定键的值，如：(value, true)。
+// 若键不存在则返回 (nil, false)。
+func (ctx *RequestContext) Get(key string) (value any, exists bool) {
+	ctx.mu.RLock()
+	value, exists = ctx.Keys[key]
+	ctx.mu.RUnlock()
+	return
+}
+
+// MustGet 返回给定键的值，若键不存则触发恐慌。
+func (ctx *RequestContext) MustGet(key string) any {
+	if value, exists := ctx.Get(key); exists {
+		return value
+	}
+	panic("Key \"" + key + "\" 不存在")
+}
+
+// GetString 返回给定键关联值的字符串形式，当类型错误时返回 ""。
+func (ctx *RequestContext) GetString(key string) (s string) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		s, _ = val.(string)
+	}
+	return
+}
+
+// GetBool 返回给定键关联值的布尔形式，当类型错误时返回 false。
+func (ctx *RequestContext) GetBool(key string) (b bool) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		b, _ = val.(bool)
+	}
+	return
+}
+
+// GetInt 返回给定键关联值的整数形式，当类型错误时返回 0。
+func (ctx *RequestContext) GetInt(key string) (i int) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		i, _ = val.(int)
+	}
+	return
+}
+
+// GetInt32 返回给定键关联值的整数形式，当类型错误时返回 int32(0)。
+func (ctx *RequestContext) GetInt32(key string) (i32 int32) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		i32, _ = val.(int32)
+	}
+	return
+}
+
+// GetInt64 返回给定键关联值的整数形式，当类型错误时返回 int64(0)。
+func (ctx *RequestContext) GetInt64(key string) (i64 int64) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		i64, _ = val.(int64)
+	}
+	return
+}
+
+// GetUint 返回给定键关联值的整数形式，当类型错误时返回 uint(0)。
+func (ctx *RequestContext) GetUint(key string) (ui uint) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		ui, _ = val.(uint)
+	}
+	return
+}
+
+// GetUint32 返回给定键关联值的整数形式，当类型错误时返回 uint32(0)。
+func (ctx *RequestContext) GetUint32(key string) (ui32 uint32) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		ui32, _ = val.(uint32)
+	}
+	return
+}
+
+// GetUint64 返回给定键关联值的整数形式，当类型错误时返回 uint64(0)。
+func (ctx *RequestContext) GetUint64(key string) (ui64 uint64) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		ui64, _ = val.(uint64)
+	}
+	return
+}
+
+// GetFloat32 返回给定键关联值的整数形式，当类型错误时返回 float32(0)。
+func (ctx *RequestContext) GetFloat32(key string) (f32 float32) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		f32, _ = val.(float32)
+	}
+	return
+}
+
+// GetFloat64 返回给定键关联值的整数形式，当类型错误时返回 float64(0)。
+func (ctx *RequestContext) GetFloat64(key string) (f64 float64) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		f64, _ = val.(float64)
+	}
+	return
+}
+
+// GetTime 返回给定键关联值的时间形式，当类型错误时返回 time.Time{}。
+func (ctx *RequestContext) GetTime(key string) (t time.Time) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		t, _ = val.(time.Time)
+	}
+	return
+}
+
+// GetDuration 返回给定键关联值的时长形式，当类型错误时返回 time.Duration{}。
+func (ctx *RequestContext) GetDuration(key string) (t time.Duration) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		t, _ = val.(time.Duration)
+	}
+	return
+}
+
+// GetStringSlice 返回给定键关联值的字符串切片形式，当类型错误时返回 []string(nil)。
+func (ctx *RequestContext) GetStringSlice(key string) (ss []string) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		ss, _ = val.([]string)
+	}
+	return
+}
+
+// GetStringMap 返回给定键关联值的字典形式，当类型错误时返回 map[string]any(nil)。
+func (ctx *RequestContext) GetStringMap(key string) (sm map[string]any) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		sm, _ = val.(map[string]any)
+	}
+	return
+}
+
+// GetStringMapString 返回给定键关联值的字典形式，当类型错误时返回 map[string]string(nil)。
+func (ctx *RequestContext) GetStringMapString(key string) (sms map[string]string) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		sms, _ = val.(map[string]string)
+	}
+	return
+}
+
+// GetStringMapStringSlice 返回给定键关联值的字典形式，当类型错误时返回 map[string][]string(nil)。
+func (ctx *RequestContext) GetStringMapStringSlice(key string) (smss map[string][]string) {
+	if val, ok := ctx.Get(key); ok && val != nil {
+		smss, _ = val.(map[string][]string)
+	}
+	return
+}
+
+// Cookie 返回请求头中给定 key 的 cookie 值。
+func (ctx *RequestContext) Cookie(key string) []byte {
+	return ctx.Request.Header.Cookie(key)
+}
+
+// UserAgent 返回请求的用户代理值。
+func (ctx *RequestContext) UserAgent() []byte {
+	return ctx.Request.Header.UserAgent()
+}
+
+// Status 设置 HTTP 响应状态吗。
+func (ctx *RequestContext) Status(code int) {
+	ctx.SetStatusCode(code)
 }
 
 // bodyAllowedForStatus 拷贝自 http.bodyAllowedForStatus，
@@ -538,8 +743,8 @@ type (
 	// ClientIP 是获取获取客户端 IP 的自定义函数。
 	ClientIP        func(ctx *RequestContext) string
 	ClientIPOptions struct {
-		RemoteIPHeaders []string        // 客户端 IP 标头名称
-		TrustedProxies  map[string]bool // 可信代理
+		RemoteIPHeaders []string        // 客户端 IP 标头名称的
+		TrustedProxies  map[string]bool // 可信的代理服务器，对应于 X-Forwarded-For
 	}
 
 	// FormValueFunc 是获取表单值的自定义函数。
@@ -570,6 +775,12 @@ var defaultClientIPOptions = ClientIPOptions{
 	TrustedProxies:  map[string]bool{"0.0.0.0": true},
 }
 var defaultClientIP = ClientIPWithOption(defaultClientIPOptions)
+
+// SetClientIPFunc 设置 ClientIP 函数实现自定义 IP 获取方法。
+// Deprecated: 使用 engine.SetClientIPFunc 替代此方法。
+func SetClientIPFunc(fn ClientIP) {
+	defaultClientIP = fn
+}
 
 // ClientIPWithOption 用于生成自定义 ClientIP 函数，并由 engine.SetClientIPFunc 设置。
 func ClientIPWithOption(opts ClientIPOptions) ClientIP {
@@ -610,7 +821,7 @@ func validateHeader(trustedProxies map[string]bool, ips string) (clientIP string
 
 		// X-Forwarded-For 由代理追加
 		// 按相反顺序检查 IP，并在找到不受信任的代理时停止
-		if i == 0 || (!isTrustedProxy(trustedProxies, ipStr)) {
+		if (i == 0) || (!isTrustedProxy(trustedProxies, ipStr)) {
 			return ipStr, true
 		}
 	}

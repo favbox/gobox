@@ -12,7 +12,7 @@ type Data struct {
 
 // Render 渲染二进制数据和自定义内容类型。
 func (r Data) Render(resp *protocol.Response) error {
-	r.WriteContentType(resp)
+	writeContentType(resp, r.ContentType)
 	resp.AppendBody(r.Data)
 	return nil
 }

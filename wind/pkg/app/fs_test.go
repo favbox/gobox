@@ -3,10 +3,14 @@ package app
 import (
 	"bytes"
 	"context"
+	"io/ioutil"
+	"os"
 	"testing"
 
+	"github.com/favbox/gosky/wind/pkg/common/test/mock"
 	"github.com/favbox/gosky/wind/pkg/protocol"
 	"github.com/favbox/gosky/wind/pkg/protocol/consts"
+	"github.com/favbox/gosky/wind/pkg/protocol/http1/resp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -123,4 +127,14 @@ func TestServeFileHead(t *testing.T) {
 	if contentLength != len(expectedBody) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
 	}
+}
+
+func getFileContents(path string) ([]byte, error) {
+	path = "." + path
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return ioutil.ReadAll(f)
 }

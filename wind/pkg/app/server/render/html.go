@@ -22,7 +22,7 @@ type HTML struct {
 
 // Render 渲染 HTML 超文本。
 func (r HTML) Render(resp *protocol.Response) error {
-	r.WriteContentType(resp)
+	writeContentType(resp, htmlContentType)
 
 	if r.Name == "" {
 		return r.Template.Execute(resp.BodyWriter(), r.Data)

@@ -8,10 +8,11 @@ import (
 	"github.com/favbox/gosky/wind/pkg/protocol"
 )
 
+var jsonContentType = "application/json; charset=utf-8"
+var jsonMarshalFunc JSONMarshaler
+
 // JSONMarshaler 自定义 json.Marshal。
 type JSONMarshaler func(v any) ([]byte, error)
-
-var jsonMarshalFunc JSONMarshaler
 
 func init() {
 	ResetJSONMarshal(hjson.Marshal)
@@ -27,15 +28,13 @@ func ResetJSONMarshal(fn JSONMarshaler) {
 	jsonMarshalFunc = fn
 }
 
-var jsonContentType = "application/json; charset=utf-8"
-
 // JSONRender 表示默认 JSON 渲染器（无缩进、启用 html 转义）。
 type JSONRender struct {
 	Data any
 }
 
 func (r JSONRender) Render(resp *protocol.Response) error {
-	r.WriteContentType(resp)
+	writeContentType(resp, jsonContentType)
 	jsonBytes, err := jsonMarshalFunc(r.Data)
 	if err != nil {
 		return err
@@ -55,7 +54,7 @@ type PureJSON struct {
 }
 
 func (r PureJSON) Render(resp *protocol.Response) error {
-	r.WriteContentType(resp)
+	writeContentType(resp, jsonContentType)
 	buf := new(bytes.Buffer)
 	encoder := json.NewEncoder(buf)
 	encoder.SetEscapeHTML(false)
@@ -77,7 +76,7 @@ type IndentedJSON struct {
 }
 
 func (r IndentedJSON) Render(resp *protocol.Response) error {
-	r.WriteContentType(resp)
+	writeContentType(resp, jsonContentType)
 	jsonBytes, err := jsonMarshalFunc(r.Data)
 	if err != nil {
 		return err
